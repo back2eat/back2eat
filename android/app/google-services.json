@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "450928341853",
+    "project_id": "back2eat-prod",
+    "storage_bucket": "back2eat-prod.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:450928341853:android:3982807201c0b51dc12eb4",
+        "android_client_info": {
+          "package_name": "com.back2eat.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBYvrOCT0uBKovHquP9nOVRLJE0W9-y2ok"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:450928341853:android:5d75bfde22fd5ed3c12eb4",
+        "android_client_info": {
+          "package_name": "com.example.back2eat_partner"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBYvrOCT0uBKovHquP9nOVRLJE0W9-y2ok"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

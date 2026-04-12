@@ -1,0 +1,63 @@
+name: back2eat
+description: Back2Eat - Dine-in & Take-Away (no home delivery)
+publish_to: "none"
+version: 1.0.0+3
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State
+  flutter_bloc: ^8.1.4
+  equatable: ^2.0.5
+
+  # UI (pixel perfect)
+  flutter_screenutil: ^5.9.3
+  google_fonts: ^6.1.0
+
+  # Navigation
+  go_router: ^13.2.0
+
+  # DI
+  get_it: ^7.6.7
+
+  # Network
+  dio: ^5.4.1
+  http: ^1.2.0
+  shared_preferences: ^2.2.3
+
+  intl: ^0.19.0
+
+  # Images (fix photos not loading)
+  cached_network_image: ^3.3.1
+
+  # Location & distance
+  geolocator: ^12.0.0
+
+  # Firebase & FCM
+  firebase_core: ^3.3.0
+  firebase_messaging: ^15.1.0
+  flutter_local_notifications: ^17.2.2
+  url_launcher: ^6.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+  flutter_launcher_icons: ^0.13.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/brand/back2eat_logo.png
+    - assets/images/brand/back2eat_icon.png
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/images/brand/back2eat_icon.png
+  min_sdk_android: 21
+  remove_alpha_ios: true
