@@ -17,7 +17,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.back2eat_main"
+    namespace = "com.back2eat.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "27.0.12077973"
 
@@ -35,8 +35,8 @@ android {
         applicationId = "com.back2eat.app"
         minSdk = 21
         targetSdk = flutter.targetSdkVersion
-        versionCode = 2
-        versionName = "1.0.3"
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
     }
 
     signingConfigs {
