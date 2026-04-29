@@ -29,8 +29,9 @@ void main() async {
   await setupDependencies();
 
   // 4. FCM init — now safe because getIt<ApiClient>() is registered
-  await NotificationService.instance.init();
-
+  NotificationService.instance.init().catchError((e) {
+    debugPrint('FCM init error: $e');
+  });
   runApp(const Back2EatBootstrap());
 }
 
