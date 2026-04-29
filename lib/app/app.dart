@@ -15,9 +15,7 @@ class _Back2EatAppState extends State<Back2EatApp> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) LocationPermissionHelper.requestOnStartup(context);
-    });
+
   }
 
   @override

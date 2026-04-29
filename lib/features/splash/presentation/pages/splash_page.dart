@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/storage/token_storage.dart';
+import '../../../../shared/utils/location_permission_helper.dart';
 
 class SplashPage extends StatefulWidget {
   const SplashPage({super.key});
@@ -40,14 +41,14 @@ class _SplashPageState extends State<SplashPage>
 
     Future.delayed(const Duration(milliseconds: 2200), () {
       if (!mounted) return;
+      LocationPermissionHelper.requestOnStartup(context);
       final storage = getIt<TokenStorage>();
       if (storage.isLoggedIn) {
         context.go('/home');
       } else {
         context.go('/start');
       }
-    });
-  }
+    });  }
 
   @override
   void dispose() {

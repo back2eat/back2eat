@@ -24,10 +24,12 @@ import '../../features/reviews/presentation/pages/submit_review_page.dart';
 import '../../shared/services/notification_service.dart';
 
 class AppRouter {
+  // Create nav key independently — do NOT read NotificationService here
+  static final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
+
   static final GoRouter router = GoRouter(
     initialLocation: '/splash',
-    // ── Give NotificationService access to the navigator context ─────────────
-    navigatorKey: AppRouter._navKey,
+    navigatorKey: _navKey,
     observers: [_NotifNavObserver()],
     routes: [
       GoRoute(path: '/splash', builder: (_, __) => const SplashPage()),
@@ -51,7 +53,7 @@ class AppRouter {
         path: '/restaurant/:id',
         builder: (context, state) {
           final id               = state.pathParameters['id']!;
-          final selectedBranchId = state.extra as String?; // ← from branch picker
+          final selectedBranchId = state.extra as String?;
           return BlocProvider(
             create: (_) => getIt<RestaurantBloc>()
               ..add(LoadRestaurantDetailEvent(
@@ -91,10 +93,6 @@ class AppRouter {
       ),
     ],
   );
-
-  // Shared navigator key — passed to NotificationService for tap navigation
-  static final _navKey = NotificationService.instance.navigatorKey ??
-      (NotificationService.instance.navigatorKey = GlobalKey<NavigatorState>());
 }
 
 /// Keeps NotificationService.navigatorKey in sync after router builds
