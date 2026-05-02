@@ -56,19 +56,20 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyD7mHRQlfmIgNZbUglUTC7ugsnqRdf3niw',
-    appId: '1:54868201966:android:235701aa3384e55e683eff',
-    messagingSenderId: '54868201966',
-    projectId: 'back2eat-customer',
-    storageBucket: 'back2eat-customer.firebasestorage.app',
+    apiKey: 'AIzaSyBYvrOCT0uBKovHquP9nOVRLJE0W9-y2ok',
+    appId: '1:450928341853:android:3982807201c0b51dc12eb4',
+    messagingSenderId: '450928341853',
+    projectId: 'back2eat-prod',
+    storageBucket: 'back2eat-prod.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyAmKgeQstxaQ6eZuhNBfmpE761yiqlYxik',
-    appId: '1:54868201966:ios:cbe655b909ebce31683eff',
-    messagingSenderId: '54868201966',
-    projectId: 'back2eat-customer',
-    storageBucket: 'back2eat-customer.firebasestorage.app',
-    iosBundleId: 'com.example.back2eatMain',
+    apiKey: 'AIzaSyC1S2M7qJkvF3ynjgQlI3dMEw1zVex0NTY',
+    appId: '1:450928341853:ios:7d81092f34c021cac12eb4',
+    messagingSenderId: '450928341853',
+    projectId: 'back2eat-prod',
+    storageBucket: 'back2eat-prod.firebasestorage.app',
+    iosBundleId: 'com.back2eat.app',
   );
+
 }
