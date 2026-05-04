@@ -116,18 +116,21 @@ class NotificationService {
 
   // ── Register token after login ─────────────────────────────────────────────
   Future<void> registerTokenAfterLogin() async {
-    try {
-      final token = await _messaging.getToken();
-      if (token == null) {
-        debugPrint('[FCM] Token is null — permissions may be denied');
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      try {
+        final token = await _messaging.getToken();
+        if (token == null) {
+          debugPrint('[FCM] Token is null — permissions may be denied');
+          return;
+        }
+        await _registerToken(token);
         return;
+      } catch (e) {
+        debugPrint('[FCM] registerTokenAfterLogin attempt $attempt failed: $e');
+        if (attempt < 3) await Future.delayed(Duration(seconds: attempt * 2));
       }
-      await _registerToken(token);
-    } catch (e) {
-      debugPrint('[FCM] registerTokenAfterLogin failed: $e');
     }
   }
-
   Future<void> _registerToken(String token) async {
     try {
       await getIt<ApiClient>().patch('/auth/fcm-token', {'fcmToken': token});
