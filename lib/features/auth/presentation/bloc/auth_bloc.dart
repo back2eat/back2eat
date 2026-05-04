@@ -1,6 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import '../../domain/repositories/auth_repository.dart';
+
 import '../../../../core/network/api_client.dart';
+import '../../../../shared/services/notification_service.dart';
+import '../../domain/repositories/auth_repository.dart';
 import 'auth_event.dart';
 import 'auth_state.dart';
 
@@ -16,11 +19,15 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<AuthUpdateProfileEvent>(_updateProfile);
   }
 
-  Future<void> _checkSession(AuthCheckSessionEvent e, Emitter<AuthState> emit) async {
+  // ── Check existing session on app start ───────────────────────────────────
+  Future<void> _checkSession(
+      AuthCheckSessionEvent e, Emitter<AuthState> emit) async {
     if (_repo.isLoggedIn) {
       final user = await _repo.getMe();
       if (user != null) {
         emit(AuthAuthenticated(user: user));
+        // Re-register FCM token for returning logged-in user
+        _registerFcmToken();
       } else {
         emit(const AuthUnauthenticated());
       }
@@ -29,15 +36,15 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     }
   }
 
-  Future<void> _requestOtp(AuthRequestOtpEvent e, Emitter<AuthState> emit) async {
+  // ── Request OTP ───────────────────────────────────────────────────────────
+  Future<void> _requestOtp(
+      AuthRequestOtpEvent e, Emitter<AuthState> emit) async {
     emit(const AuthLoading());
     try {
       final isNewUser = await _repo.requestOtp(e.mobile);
       if (isNewUser) {
-        // New number — tell the UI to navigate to signup with this mobile
         emit(AuthNewUserDetected(e.mobile));
       } else {
-        // Existing user — show OTP input
         emit(AuthOtpSent(e.mobile));
       }
     } on ApiException catch (ex) {
@@ -47,7 +54,9 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     }
   }
 
-  Future<void> _resendOtp(AuthResendOtpEvent e, Emitter<AuthState> emit) async {
+  // ── Resend OTP ────────────────────────────────────────────────────────────
+  Future<void> _resendOtp(
+      AuthResendOtpEvent e, Emitter<AuthState> emit) async {
     try {
       await _repo.resendOtp(e.mobile);
       emit(AuthOtpResent(e.mobile));
@@ -58,14 +67,20 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     }
   }
 
-  Future<void> _verifyOtp(AuthVerifyOtpEvent e, Emitter<AuthState> emit) async {
+  // ── Verify OTP & Login ────────────────────────────────────────────────────
+  Future<void> _verifyOtp(
+      AuthVerifyOtpEvent e, Emitter<AuthState> emit) async {
     emit(const AuthLoading());
     try {
       final result = await _repo.requestAndVerifyOtp(
         mobile: e.mobile,
-        otp: e.otp,
+        otp:    e.otp,
       );
       emit(AuthAuthenticated(user: result.user, isNewUser: result.isNewUser));
+
+      // Register FCM token now that auth token is saved
+      _registerFcmToken();
+
     } on ApiException catch (ex) {
       emit(AuthError(ex.message));
     } catch (_) {
@@ -73,12 +88,15 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     }
   }
 
+  // ── Logout ────────────────────────────────────────────────────────────────
   Future<void> _logout(AuthLogoutEvent e, Emitter<AuthState> emit) async {
     await _repo.logout();
     emit(const AuthUnauthenticated());
   }
 
-  Future<void> _updateProfile(AuthUpdateProfileEvent e, Emitter<AuthState> emit) async {
+  // ── Update Profile ────────────────────────────────────────────────────────
+  Future<void> _updateProfile(
+      AuthUpdateProfileEvent e, Emitter<AuthState> emit) async {
     emit(const AuthLoading());
     try {
       final user = await _repo.updateProfile(name: e.name, email: e.email);
@@ -88,5 +106,12 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     } catch (_) {
       emit(const AuthError('Profile update failed.'));
     }
+  }
+
+  // ── FCM Token Registration ────────────────────────────────────────────────
+  void _registerFcmToken() {
+    NotificationService.instance.registerTokenAfterLogin().catchError((e) {
+      debugPrint('[FCM] Token registration failed: $e');
+    });
   }
 }
