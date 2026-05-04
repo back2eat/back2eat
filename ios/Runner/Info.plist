@@ -71,7 +71,7 @@
 
     <!-- Firebase / FCM -->
     <key>FirebaseAppDelegateProxyEnabled</key>
-    <false/>
+    <true/>
 <key>ITSAppUsesNonExemptEncryption</key>
 <false/>
 </dict>
