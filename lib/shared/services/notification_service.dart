@@ -12,7 +12,9 @@ class NotificationService {
   NotificationService._();
   static final NotificationService instance = NotificationService._();
 
-  final _messaging   = FirebaseMessaging.instance;
+  // ── LAZY getter — only accessed AFTER Firebase.initializeApp() ────────────
+  FirebaseMessaging get _messaging => FirebaseMessaging.instance;
+
   final _localNotifs = FlutterLocalNotificationsPlugin();
 
   static const _channelId   = 'back2eat_orders';
@@ -27,90 +29,92 @@ class NotificationService {
 
   bool _initialised = false;
 
-  // ── Notification templates ────────────────────────────────────────────────
+  // ── Notification templates ─────────────────────────────────────────────────
   static const _typeConfig = {
-    'ORDER_ACCEPTED':    ('Order Accepted! 🎉',      'Your order has been accepted by the restaurant.'),
-    'ORDER_PREPARING':   ('Being Prepared 👨‍🍳',      'The kitchen is preparing your order now.'),
-    'ORDER_READY':       ('Order Ready! 🍽️',          'Your order is ready. Please collect it!'),
-    'ORDER_CANCELLED':   ('Order Cancelled ❌',       'Your order was cancelled.'),
-    'ORDER_STATUS':      ('Order Update 🔔',          null),
-    'BOOKING_CONFIRMED': ('Booking Confirmed! 🪑',    'Your table is confirmed. Please complete the ₹19 payment.'),
-    'BOOKING_CANCELLED': ('Booking Cancelled',        'Your table booking was cancelled by the restaurant.'),
-    'PAYMENT_SUCCESS':   ('Payment Successful ✅',    'Your payment was processed successfully.'),
-    'LUCKY_DRAW_WIN':    ('🎉 You Won the Lucky Draw!','Your prize has been added to your wallet!'),
-    'LUCKY_DRAW_TICKET': ('🎟️ Lucky Draw Ticket!',    'Your ticket is entered in the draw. Good luck!'),
+    'ORDER_ACCEPTED':    ('Order Accepted! 🎉',       'Your order has been accepted by the restaurant.'),
+    'ORDER_PREPARING':   ('Being Prepared 👨‍🍳',       'The kitchen is preparing your order now.'),
+    'ORDER_READY':       ('Order Ready! 🍽️',           'Your order is ready. Please collect it!'),
+    'ORDER_CANCELLED':   ('Order Cancelled ❌',        'Your order was cancelled.'),
+    'ORDER_STATUS':      ('Order Update 🔔',           null),
+    'BOOKING_CONFIRMED': ('Booking Confirmed! 🪑',     'Your table is confirmed. Please complete the ₹19 payment.'),
+    'BOOKING_CANCELLED': ('Booking Cancelled',         'Your table booking was cancelled by the restaurant.'),
+    'PAYMENT_SUCCESS':   ('Payment Successful ✅',     'Your payment was processed successfully.'),
+    'LUCKY_DRAW_WIN':    ('🎉 You Won the Lucky Draw!', 'Your prize has been added to your wallet!'),
+    'LUCKY_DRAW_TICKET': ('🎟️ Lucky Draw Ticket!',     'Your ticket is entered in the draw. Good luck!'),
   };
 
-  // ── Init — called from main() AFTER setupDependencies() ──────────────────
+  // ── Init — called from main() AFTER Firebase.initializeApp() ─────────────
   Future<void> init() async {
     if (_initialised) return;
     _initialised = true;
 
-    // 1. Request permission
-    final settings = await _messaging.requestPermission(
-      alert: true, badge: true, sound: true,
-      provisional: false,
-    );
-    debugPrint('[FCM] Permission: ${settings.authorizationStatus}');
+    try {
+      // 1. Request permission
+      final settings = await _messaging.requestPermission(
+        alert: true, badge: true, sound: true,
+        provisional: false,
+      );
+      debugPrint('[FCM] Permission: ${settings.authorizationStatus}');
 
-    // 2. Create Android notification channel
-    const channel = AndroidNotificationChannel(
-      _channelId, _channelName,
-      description: 'Real-time order and booking updates',
-      importance: Importance.max,
-      playSound: true,
-      enableVibration: true,
-    );
-    await _localNotifs
-        .resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(channel);
+      // 2. Create Android notification channel
+      const channel = AndroidNotificationChannel(
+        _channelId, _channelName,
+        description: 'Real-time order and booking updates',
+        importance: Importance.max,
+        playSound: true,
+        enableVibration: true,
+      );
+      await _localNotifs
+          .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(channel);
 
-    // 3. Android 13+ runtime notification permission
-    await _localNotifs
-        .resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
+      // 3. Android 13+ runtime notification permission
+      await _localNotifs
+          .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
 
-    // 4. Init local notifications plugin
-    const initSettings = InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-      iOS:     DarwinInitializationSettings(
-        requestAlertPermission: true,
-        requestBadgePermission: true,
-        requestSoundPermission: true,
-      ),
-    );
-    await _localNotifs.initialize(
-      initSettings,
-      onDidReceiveNotificationResponse: _onLocalNotifTap,
-    );
+      // 4. Init local notifications plugin
+      const initSettings = InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        iOS: DarwinInitializationSettings(
+          requestAlertPermission: true,
+          requestBadgePermission: true,
+          requestSoundPermission: true,
+        ),
+      );
+      await _localNotifs.initialize(
+        initSettings,
+        onDidReceiveNotificationResponse: _onLocalNotifTap,
+      );
 
-    // 5. Foreground FCM messages
-    FirebaseMessaging.onMessage.listen(_onForegroundMessage);
+      // 5. Foreground FCM messages
+      FirebaseMessaging.onMessage.listen(_onForegroundMessage);
 
-    // 6. App brought to foreground by tapping notification
-    FirebaseMessaging.onMessageOpenedApp.listen(_onMessageOpenedApp);
+      // 6. App brought to foreground by tapping notification
+      FirebaseMessaging.onMessageOpenedApp.listen(_onMessageOpenedApp);
 
-    // 7. App launched from terminated state via notification tap
-    final initialMessage = await _messaging.getInitialMessage();
-    if (initialMessage != null) {
-      // Delay so router is mounted
-      Future.delayed(const Duration(milliseconds: 1000), () {
-        _routeFromMessage(initialMessage.data);
-      });
+      // 7. App launched from terminated state via notification tap
+      final initialMessage = await _messaging.getInitialMessage();
+      if (initialMessage != null) {
+        Future.delayed(const Duration(milliseconds: 1000), () {
+          _routeFromMessage(initialMessage.data);
+        });
+      }
+
+      // 8. Token refresh — re-register with backend
+      _messaging.onTokenRefresh.listen(_registerToken);
+
+      // 9. Register current token
+      await registerTokenAfterLogin();
+
+    } catch (e) {
+      debugPrint('[FCM] init error: $e');
     }
-
-    // 8. Token refresh — re-register with backend
-    _messaging.onTokenRefresh.listen((token) {
-      _registerToken(token);
-    });
-
-    // 9. Register current token now
-    await registerTokenAfterLogin();
   }
 
-  // ── Register token after login ────────────────────────────────────────────
+  // ── Register token after login ─────────────────────────────────────────────
   Future<void> registerTokenAfterLogin() async {
     try {
       final token = await _messaging.getToken();
@@ -133,45 +137,42 @@ class NotificationService {
     }
   }
 
-  // ── Background message handler (called from top-level in main.dart) ───────
+  // ── Background message handler ─────────────────────────────────────────────
   Future<void> handleBackgroundMessage(RemoteMessage message) async {
     await _showLocalNotification(message);
   }
 
-  // ── Foreground message ────────────────────────────────────────────────────
+  // ── Foreground message ─────────────────────────────────────────────────────
   Future<void> _onForegroundMessage(RemoteMessage message) async {
     debugPrint('[FCM] Foreground: type=${message.data["type"]} orderId=${message.data["orderId"]}');
-    // Show local notification so user sees it while app is open
     await _showLocalNotification(message);
-    // Emit orderId so order-tracking page can silently refresh
     final orderId = message.data['orderId'] as String?;
     if (orderId != null && orderId.isNotEmpty) {
       _orderUpdateController.add(orderId);
     }
   }
 
-  // ── App opened from background notification ───────────────────────────────
+  // ── App opened from background notification ────────────────────────────────
   void _onMessageOpenedApp(RemoteMessage message) {
     debugPrint('[FCM] Opened from background: ${message.data}');
     _routeFromMessage(message.data);
   }
 
-  // ── Local notification tap ────────────────────────────────────────────────
+  // ── Local notification tap ─────────────────────────────────────────────────
   void _onLocalNotifTap(NotificationResponse response) {
     final payload = response.payload;
     if (payload == null || payload.isEmpty) return;
     debugPrint('[FCM] Local notif tapped, payload: $payload');
-    // payload format: "order:ID" or "booking:ID"
     if (payload.startsWith('order:')) {
       _navigateToOrder(payload.substring(6));
     } else if (payload.startsWith('booking:')) {
       _navigateToBookingPayment(payload.substring(8));
     } else {
-      _navigateToOrder(payload); // legacy — just orderId
+      _navigateToOrder(payload);
     }
   }
 
-  // ── Route from FCM data ───────────────────────────────────────────────────
+  // ── Route from FCM data ────────────────────────────────────────────────────
   void _routeFromMessage(Map<String, dynamic> data) {
     final type    = data['type']    as String? ?? '';
     final orderId = data['orderId'] as String? ?? '';
@@ -186,7 +187,7 @@ class NotificationService {
     }
   }
 
-  // ── Show local notification ───────────────────────────────────────────────
+  // ── Show local notification ────────────────────────────────────────────────
   Future<void> _showLocalNotification(RemoteMessage message) async {
     final type   = message.data['type'] as String? ?? '';
     final config = _typeConfig[type];
@@ -199,7 +200,6 @@ class NotificationService {
       body = message.notification?.body ?? '';
     }
 
-    // Enrich order notifications with order number
     final orderNumber = message.data['orderNumber'] as String?;
     if (orderNumber != null && type != 'ORDER_STATUS') {
       body = '#$orderNumber — $body';
@@ -208,7 +208,6 @@ class NotificationService {
     final orderId   = message.data['orderId']   as String?;
     final bookingId = message.data['bookingId'] as String?;
 
-    // Payload encodes what to navigate to on tap
     String payload = '';
     if (orderId != null && orderId.isNotEmpty) {
       payload = 'order:$orderId';
@@ -216,7 +215,6 @@ class NotificationService {
       payload = 'booking:$bookingId';
     }
 
-    // Use orderId as notif ID so updates replace each other for the same order
     final notifId = (orderId ?? bookingId ?? message.messageId ?? '')
         .hashCode
         .abs() % 100000;
@@ -245,7 +243,7 @@ class NotificationService {
     );
   }
 
-  // ── Navigation helpers ────────────────────────────────────────────────────
+  // ── Navigation helpers ─────────────────────────────────────────────────────
   void _navigateToOrder(String orderId) {
     final ctx = navigatorKey?.currentContext;
     if (ctx == null) {
