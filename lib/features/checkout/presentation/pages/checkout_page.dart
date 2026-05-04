@@ -95,6 +95,7 @@ class _CheckoutViewState extends State<_CheckoutView> {
 
   int    get _pointsToRedeem => _usePoints ? (_pointsDiscount / _pointsValuePerPt).round() : 0;
   double get _totalSavings   => _discountAmount + _pointsDiscount;
+  bool _isSubmitting = false;
 
   @override
   void initState() {
@@ -181,33 +182,23 @@ class _CheckoutViewState extends State<_CheckoutView> {
       int?         guestCount,
       int          pointsToRedeem,
       ) {
-    if (orderType == OrderType.tableBooking) {
-      // ── TABLE BOOKING → BookingBloc ───────────────────────────────────
-      context.read<BookingBloc>().add(CreateBookingEvent(
-        restaurantId:    cart.items.first.restaurantId,
-        branchId:        cart.items.first.branchId,
-        guestCount:      guestCount ?? 1,
-        bookingDate:     DateTime.now(),
-        timeSlot:        _selectedTime!,
-        specialRequests: null,
-      ));
-    } else {
-      // ── REGULAR ORDER → OrderBloc ─────────────────────────────────────
-      context.read<OrderBloc>().add(PlaceOrderEvent(
-        restaurantId:     cart.items.first.restaurantId,
-        branchId:         cart.items.first.branchId,
-        orderType:        orderType,
-        cartItems:        cart.items,
-        scheduledTime:    _selectedTime,
-        guestCount:       guestCount,
-        couponCode:       _appliedCode,
-        pointsRedeemed:   pointsToRedeem > 0 ? pointsToRedeem : null,
-        subtotal:         subtotal,
-        commissionAmount: commission,
-        bookingFee:       bookingFee,
-        totalAmount:      total,
-      ));
-    }
+    if (_isSubmitting) return;                        // ← ADD guard
+    setState(() => _isSubmitting = true);             // ← ADD
+
+    context.read<OrderBloc>().add(PlaceOrderEvent(
+      restaurantId:     cart.items.first.restaurantId,
+      branchId:         cart.items.first.branchId,
+      orderType:        orderType,
+      cartItems:        cart.items,
+      scheduledTime:    _selectedTime,
+      guestCount:       guestCount,
+      couponCode:       _appliedCode,
+      pointsRedeemed:   pointsToRedeem > 0 ? pointsToRedeem : null,
+      subtotal:         subtotal,
+      commissionAmount: commission,
+      bookingFee:       bookingFee,
+      totalAmount:      total,
+    ));
   }
 
   @override
@@ -220,17 +211,17 @@ class _CheckoutViewState extends State<_CheckoutView> {
         BlocListener<OrderBloc, OrderState>(
           listener: (context, state) {
             if (state is OrderPlaced) {
+              if (mounted) setState(() => _isSubmitting = false);  // ← ADD
               context.read<CartBloc>().add(const ClearCartEvent());
               context.go('/order-tracking', extra: state.order.id);
             }
             if (state is OrderError) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(state.message), backgroundColor: AppColors.danger),
-              );
+              if (mounted) setState(() => _isSubmitting = false);  // ← ADD
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(SnackBar(content: Text(state.message)));
             }
           },
-        ),
-        // ── Booking created ─────────────────────────────────────────────
+        ),        // ── Booking created ─────────────────────────────────────────────
         BlocListener<BookingBloc, BookingState>(
           listener: (context, state) {
             if (state is BookingCreated) {
@@ -700,11 +691,15 @@ class _CheckoutViewState extends State<_CheckoutView> {
                                         ? 'Request Table Booking'
                                         : 'Place Order',
                                     onTap: () {
-                                      if (isEmpty || isLoading || needsTimeSlot) return;
-                                      _placeOrder(context, cart, orderType, subtotal, commission,
-                                          bookingFee, total, needsGuests ? _guestCount : null, _pointsToRedeem);
-                                    },
-                                  ),
+                                      if (isEmpty || isLoading || needsTimeSlot || _isSubmitting) return;  // ← ADD _isSubmitting check
+                                      _placeOrder(
+                                        context, cart, orderType,
+                                        subtotal, commission,
+                                        bookingFee, total,
+                                        needsGuests ? _guestCount : null,
+                                        _pointsToRedeem,
+                                      );
+                                    },                                  ),
                                 ),
                                 if (isTableBooking) ...[
                                   SizedBox(height: 6.h),

@@ -3,7 +3,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/di/injection.dart';
+import '../../features/bookings/presentation/bloc/booking_bloc.dart';
 import '../../features/bookings/presentation/pages/booking_payment_page.dart';
+import '../../features/bookings/presentation/pages/booking_pre_payment_page.dart';
 import '../../features/home/presentation/bloc/restaurant_bloc.dart';
 import '../../features/home/presentation/bloc/restaurant_event.dart';
 import '../../features/splash/presentation/pages/splash_page.dart';
@@ -99,6 +101,19 @@ class AppRouter {
           return BookingPaymentPage(
             bookingId: extra['bookingId']!,
             orderId:   extra['orderId']!,
+          );
+        },
+      ),
+      GoRoute(
+        path: '/booking-pre-payment',
+        builder: (_, state) {
+          final extra = state.extra as Map<String, String>;
+          return BlocProvider(
+            create: (_) => getIt<BookingBloc>(),
+            child: BookingPrePaymentPage(
+              restaurantId: extra['restaurantId']!,
+              branchId:     extra['branchId']!,
+            ),
           );
         },
       ),

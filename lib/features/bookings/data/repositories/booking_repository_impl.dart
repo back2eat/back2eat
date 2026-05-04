@@ -7,19 +7,25 @@ class BookingRepositoryImpl implements BookingRepository {
   BookingRepositoryImpl(this._api);
 
   BookingEntity _fromJson(Map<String, dynamic> j) {
+    // restaurantId
     final rest = j['restaurantId'];
     final restaurantId   = rest is Map ? rest['_id']  as String? ?? '' : rest as String? ?? '';
     final restaurantName = rest is Map ? rest['name'] as String? : null;
 
+    // tableId
     final table = j['tableId'];
     final tableId   = table is Map ? table['_id']  as String? : table as String?;
     final tableName = table is Map ? table['name'] as String? : null;
 
+    // branchId — can be populated Map or plain String
+    final branch   = j['branchId'];
+    final branchId = branch is Map ? branch['_id'] as String? : branch as String?;
+
+    // orderId
     final order = j['orderId'];
     final orderId       = order is Map ? order['_id']           as String? : order as String?;
     final paymentStatus = order is Map ? order['paymentStatus'] as String? : null;
 
-    // startTime and endTime from backend
     final startTime = j['startTime'] as String? ?? '';
     final endTime   = j['endTime']   as String? ?? '';
     final timeSlot  = endTime.isNotEmpty ? '$startTime – $endTime' : startTime;
@@ -28,7 +34,7 @@ class BookingRepositoryImpl implements BookingRepository {
       id:              j['_id']             as String,
       restaurantId:    restaurantId,
       restaurantName:  restaurantName,
-      branchId:        j['branchId']        as String?,
+      branchId:        branchId,
       guestCount:      (j['guestCount']     as num?)?.toInt() ?? 1,
       bookingDate:     DateTime.parse(j['bookingDate'] as String),
       timeSlot:        timeSlot,
@@ -40,7 +46,6 @@ class BookingRepositoryImpl implements BookingRepository {
       orderId:         orderId,
     );
   }
-
   @override
   Future<BookingEntity> createBooking({
     required String   restaurantId,
