@@ -1,4 +1,5 @@
 import '../../../../core/network/api_client.dart';
+import '../../../cart/presentation/bloc/cart_state.dart';
 import '../../domain/entities/booking.dart';
 import '../../domain/repositories/booking_repository.dart';
 
@@ -7,21 +8,17 @@ class BookingRepositoryImpl implements BookingRepository {
   BookingRepositoryImpl(this._api);
 
   BookingEntity _fromJson(Map<String, dynamic> j) {
-    // restaurantId
     final rest = j['restaurantId'];
     final restaurantId   = rest is Map ? rest['_id']  as String? ?? '' : rest as String? ?? '';
     final restaurantName = rest is Map ? rest['name'] as String? : null;
 
-    // tableId
     final table = j['tableId'];
     final tableId   = table is Map ? table['_id']  as String? : table as String?;
     final tableName = table is Map ? table['name'] as String? : null;
 
-    // branchId — can be populated Map or plain String
     final branch   = j['branchId'];
     final branchId = branch is Map ? branch['_id'] as String? : branch as String?;
 
-    // orderId
     final order = j['orderId'];
     final orderId       = order is Map ? order['_id']           as String? : order as String?;
     final paymentStatus = order is Map ? order['paymentStatus'] as String? : null;
@@ -46,6 +43,7 @@ class BookingRepositoryImpl implements BookingRepository {
       orderId:         orderId,
     );
   }
+
   @override
   Future<BookingEntity> createBooking({
     required String   restaurantId,
@@ -55,21 +53,32 @@ class BookingRepositoryImpl implements BookingRepository {
     required String   timeSlot,
     String? tableId,
     String? specialRequests,
+    List<CartLine>? cartItems,   // ← cart items for partner visibility
+    double? cartSubtotal,        // ← cart subtotal for reference
   }) async {
-    // Parse timeSlot "HH:MM AM/PM" → 24h startTime, derive endTime +1h
     final startTime = _to24h(timeSlot);
     final endTime   = _addHour(startTime);
 
     final data = await _api.post('/bookings', {
-      'restaurantId':    restaurantId,
-      'branchId':        branchId,
-      'guestCount':      guestCount,
-      'bookingDate':     bookingDate.toIso8601String(),
-      'startTime':       startTime,
-      'endTime':         endTime,
+      'restaurantId': restaurantId,
+      'branchId':     branchId,
+      'guestCount':   guestCount,
+      'bookingDate':  bookingDate.toIso8601String(),
+      'startTime':    startTime,
+      'endTime':      endTime,
       if (tableId         != null) 'tableId':         tableId,
       if (specialRequests != null) 'specialRequests': specialRequests,
+      // Send cart items so partner can see what customer plans to order
+      if (cartItems != null && cartItems.isNotEmpty)
+        'items': cartItems.map((e) => {
+          'menuItemId': e.menuItemId,
+          'name':       e.name,
+          'quantity':   e.qty,
+          'price':      e.price,
+        }).toList(),
+      if (cartSubtotal != null) 'subtotal': cartSubtotal,
     });
+
     return _fromJson(data['booking'] as Map<String, dynamic>);
   }
 
@@ -88,9 +97,6 @@ class BookingRepositoryImpl implements BookingRepository {
     await _api.patch('/bookings/my/$bookingId/cancel', {});
   }
 
-  // ── Helpers ─────────────────────────────────────────────────────────────────
-
-  /// Convert "02:30 PM" → "14:30"
   String _to24h(String slot) {
     try {
       final parts  = slot.trim().split(' ');
@@ -106,11 +112,10 @@ class BookingRepositoryImpl implements BookingRepository {
     }
   }
 
-  /// Add 1 hour to "14:30" → "15:30"
   String _addHour(String time24) {
     try {
-      final parts  = time24.split(':');
-      int hour     = int.parse(parts[0]) + 1;
+      final parts = time24.split(':');
+      int hour    = int.parse(parts[0]) + 1;
       if (hour > 23) hour = 23;
       return '${hour.toString().padLeft(2, '0')}:${parts[1]}';
     } catch (_) {

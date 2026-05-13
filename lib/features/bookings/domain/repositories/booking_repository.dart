@@ -1,14 +1,17 @@
+import '../../../cart/presentation/bloc/cart_state.dart';
 import '../entities/booking.dart';
 
 abstract class BookingRepository {
   Future<BookingEntity> createBooking({
-    required String restaurantId,
-    required String branchId,
-    required int guestCount,
+    required String   restaurantId,
+    required String   branchId,
+    required int      guestCount,
     required DateTime bookingDate,
-    required String timeSlot,
-    String? tableId,
-    String? specialRequests,
+    required String   timeSlot,
+    String?           tableId,
+    String?           specialRequests,
+    List<CartLine>?   cartItems,
+    double?           cartSubtotal,
   });
 
   Future<List<BookingEntity>> getMyBookings();
