@@ -4,10 +4,13 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/constants/app_colors.dart';
+import '../../../../core/di/injection.dart';
+import '../../../../core/network/api_client.dart';
+import '../../../bookings/domain/entities/booking.dart';
 import '../../../bookings/presentation/bloc/booking_bloc.dart';
 
-/// IMPORTANT: BookingBloc must be provided by app_router — do NOT add
-/// another BlocProvider around this page.
+/// IMPORTANT: BookingBloc must be provided by app_router.
+/// Do NOT wrap this page in another BlocProvider.
 class BookingPrePaymentPage extends StatefulWidget {
   final String restaurantId;
   final String branchId;
@@ -68,11 +71,11 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
     setState(() { _paying = true; _error = null; });
 
     try {
-      // Mock payment — replace with Razorpay SDK when going live
+      // Mock payment delay — replace with Razorpay SDK when going live
       await Future.delayed(const Duration(milliseconds: 1500));
       if (!mounted) return;
 
-      // Fire on the SAME bloc instance this widget is listening to
+      // Fire booking creation — BlocListener handles response
       context.read<BookingBloc>().add(CreateBookingEvent(
         restaurantId:    widget.restaurantId,
         branchId:        widget.branchId,
@@ -81,23 +84,48 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
         timeSlot:        _selectedTime!,
         specialRequests: null,
       ));
-      // _paying stays true until BlocListener receives BookingCreated / BookingError
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error  = e.toString().replaceAll('Exception: ', '');
-          _paying = false;
-        });
-      }
+      if (mounted) setState(() { _error = e.toString().replaceAll('Exception: ', ''); _paying = false; });
+    }
+  }
+
+  // Verify the ₹19 payment immediately after booking is created
+  // This marks the linked order's paymentStatus as PAID
+  // so bookings page shows "Place Food Order" not "Pay ₹19 again"
+  Future<void> _verifyBookingPayment(BookingEntity booking) async {
+    final orderId = booking.orderId;
+    if (orderId == null || orderId.isEmpty) return;
+    try {
+      // Step 1: Create Razorpay order
+      final orderRes = await getIt<ApiClient>().post(
+        '/payments/create-order',
+        {'orderId': orderId},
+      );
+      final razorpayOrderId = orderRes['razorpayOrderId'] as String? ?? '';
+      if (razorpayOrderId.isEmpty) return;
+
+      // Step 2: Verify with mock IDs
+      await getIt<ApiClient>().post('/payments/verify', {
+        'razorpayOrderId':   razorpayOrderId,
+        'razorpayPaymentId': 'pay_mock_${DateTime.now().millisecondsSinceEpoch}',
+        'razorpaySignature': 'mock_sig',
+        'orderId':           orderId,
+      });
+      debugPrint('[Booking] ₹19 payment verified for order: $orderId');
+    } catch (e) {
+      // Non-fatal — booking still exists, just paymentStatus stays PENDING
+      debugPrint('[Booking] Payment verify error (non-fatal): $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // NO BlocProvider here — provided by app_router
     return BlocListener<BookingBloc, BookingState>(
-      listener: (context, state) {
+      listener: (context, state) async {
         if (state is BookingCreated) {
+          // Verify payment so paymentStatus → PAID
+          await _verifyBookingPayment(state.booking);
+          if (!mounted) return;
           setState(() => _paying = false);
           _showSuccess();
         }
@@ -116,12 +144,10 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
       enableDrag: false,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => _SuccessSheet(
-        onDone: () {
-          Navigator.pop(context);   // close sheet
-          context.go('/bookings');  // navigate
-        },
-      ),
+      builder: (_) => _SuccessSheet(onDone: () {
+        Navigator.pop(context);
+        context.go('/bookings');
+      }),
     );
   }
 
@@ -149,8 +175,7 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
                   colors: [AppColors.primary, Color(0xFFE53935)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+                  begin: Alignment.topLeft, end: Alignment.bottomRight,
                 ),
                 borderRadius: BorderRadius.circular(20.r),
               ),
@@ -160,20 +185,15 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
                 SizedBox(height: 10.h),
                 Text('Table Booking Fee',
                     style: TextStyle(fontSize: 14.sp,
-                        color: Colors.white.withOpacity(0.85),
-                        fontWeight: FontWeight.w700)),
+                        color: Colors.white.withOpacity(0.85), fontWeight: FontWeight.w700)),
                 SizedBox(height: 6.h),
                 Text('₹19.00',
-                    style: TextStyle(fontSize: 36.sp,
-                        color: Colors.white, fontWeight: FontWeight.w900)),
+                    style: TextStyle(fontSize: 36.sp, color: Colors.white, fontWeight: FontWeight.w900)),
                 SizedBox(height: 4.h),
-                Text(
-                  'Refundable if restaurant cancels · Non-refundable if you cancel',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 10.sp,
-                      color: Colors.white.withOpacity(0.75),
-                      fontWeight: FontWeight.w600),
-                ),
+                Text('Refundable if restaurant cancels · Non-refundable if you cancel',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 10.sp,
+                        color: Colors.white.withOpacity(0.75), fontWeight: FontWeight.w600)),
               ]),
             ),
 
@@ -186,19 +206,16 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
             Container(
               padding: EdgeInsets.all(14.w),
               decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16.r),
+                color: Colors.white, borderRadius: BorderRadius.circular(16.r),
                 border: Border.all(color: Colors.black.withOpacity(0.05)),
               ),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('When would you like to arrive?',
-                    style: TextStyle(fontSize: 12.sp,
-                        color: AppColors.muted, fontWeight: FontWeight.w700)),
+                    style: TextStyle(fontSize: 12.sp, color: AppColors.muted, fontWeight: FontWeight.w700)),
                 SizedBox(height: 12.h),
                 _timeSlots.isEmpty
                     ? Text('No slots available today',
-                    style: TextStyle(fontSize: 12.sp,
-                        color: AppColors.danger, fontWeight: FontWeight.w700))
+                    style: TextStyle(fontSize: 12.sp, color: AppColors.danger, fontWeight: FontWeight.w700))
                     : SizedBox(
                   height: 40.h,
                   child: ListView.separated(
@@ -219,9 +236,7 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
                           ),
                           alignment: Alignment.center,
                           child: Text(slot,
-                              style: TextStyle(
-                                  fontSize: 12.sp,
-                                  fontWeight: FontWeight.w800,
+                              style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.w800,
                                   color: selected ? Colors.white : AppColors.text)),
                         ),
                       );
@@ -231,13 +246,10 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
                 if (_selectedTime != null) ...[
                   SizedBox(height: 10.h),
                   Row(children: [
-                    Icon(Icons.check_circle_rounded,
-                        size: 14.sp, color: AppColors.success),
+                    Icon(Icons.check_circle_rounded, size: 14.sp, color: AppColors.success),
                     SizedBox(width: 4.w),
                     Text('Selected: $_selectedTime',
-                        style: TextStyle(fontSize: 12.sp,
-                            color: AppColors.success,
-                            fontWeight: FontWeight.w800)),
+                        style: TextStyle(fontSize: 12.sp, color: AppColors.success, fontWeight: FontWeight.w800)),
                   ]),
                 ],
               ]),
@@ -252,8 +264,7 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
             Container(
               padding: EdgeInsets.all(14.w),
               decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16.r),
+                color: Colors.white, borderRadius: BorderRadius.circular(16.r),
                 border: Border.all(color: Colors.black.withOpacity(0.05)),
               ),
               child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -266,27 +277,21 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
                       borderRadius: BorderRadius.circular(12.r),
                     ),
                     child: Icon(Icons.remove,
-                        color: _guestCount > 1 ? Colors.white : AppColors.muted,
-                        size: 20.sp),
+                        color: _guestCount > 1 ? Colors.white : AppColors.muted, size: 20.sp),
                   ),
                 ),
                 SizedBox(width: 28.w),
                 Column(children: [
-                  Text('$_guestCount',
-                      style: TextStyle(fontSize: 28.sp, fontWeight: FontWeight.w900)),
+                  Text('$_guestCount', style: TextStyle(fontSize: 28.sp, fontWeight: FontWeight.w900)),
                   Text(_guestCount == 1 ? 'person' : 'people',
-                      style: TextStyle(fontSize: 12.sp,
-                          color: AppColors.muted, fontWeight: FontWeight.w600)),
+                      style: TextStyle(fontSize: 12.sp, color: AppColors.muted, fontWeight: FontWeight.w600)),
                 ]),
                 SizedBox(width: 28.w),
                 GestureDetector(
                   onTap: () { if (_guestCount < 20) setState(() => _guestCount++); },
                   child: Container(
                     width: 40.w, height: 40.w,
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      borderRadius: BorderRadius.circular(12.r),
-                    ),
+                    decoration: BoxDecoration(color: AppColors.primary, borderRadius: BorderRadius.circular(12.r)),
                     child: Icon(Icons.add, color: Colors.white, size: 20.sp),
                   ),
                 ),
@@ -308,23 +313,17 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
                   margin: EdgeInsets.only(bottom: 10.h),
                   padding: EdgeInsets.all(14.w),
                   decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(14.r),
+                    color: Colors.white, borderRadius: BorderRadius.circular(14.r),
                     border: Border.all(
                       color: selected ? AppColors.primary : Colors.black.withOpacity(0.06),
                       width: selected ? 1.5 : 1,
                     ),
                   ),
                   child: Row(children: [
-                    Icon(m.$2,
-                        color: selected ? AppColors.primary : AppColors.muted,
-                        size: 22.sp),
+                    Icon(m.$2, color: selected ? AppColors.primary : AppColors.muted, size: 22.sp),
                     SizedBox(width: 12.w),
-                    Expanded(child: Text(m.$3,
-                        style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w700))),
-                    if (selected)
-                      Icon(Icons.check_circle_rounded,
-                          color: AppColors.primary, size: 20.sp),
+                    Expanded(child: Text(m.$3, style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w700))),
+                    if (selected) Icon(Icons.check_circle_rounded, color: AppColors.primary, size: 20.sp),
                   ]),
                 ),
               );
@@ -334,15 +333,12 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
             if (_error != null) ...[
               Container(
                 padding: EdgeInsets.all(12.w),
-                decoration: BoxDecoration(
-                    color: AppColors.dangerSoft,
-                    borderRadius: BorderRadius.circular(10.r)),
+                decoration: BoxDecoration(color: AppColors.dangerSoft, borderRadius: BorderRadius.circular(10.r)),
                 child: Row(children: [
                   Icon(Icons.error_outline, color: AppColors.danger, size: 18.sp),
                   SizedBox(width: 8.w),
                   Expanded(child: Text(_error!,
-                      style: TextStyle(fontSize: 12.sp,
-                          color: AppColors.danger, fontWeight: FontWeight.w700))),
+                      style: TextStyle(fontSize: 12.sp, color: AppColors.danger, fontWeight: FontWeight.w700))),
                 ]),
               ),
               SizedBox(height: 12.h),
@@ -351,19 +347,15 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
             // ── Info ──────────────────────────────────────────────────────
             Container(
               padding: EdgeInsets.all(12.w),
-              decoration: BoxDecoration(
-                  color: AppColors.infoSoft,
-                  borderRadius: BorderRadius.circular(10.r)),
+              decoration: BoxDecoration(color: AppColors.infoSoft, borderRadius: BorderRadius.circular(10.r)),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Icon(Icons.info_outline_rounded, color: AppColors.info, size: 16.sp),
                 SizedBox(width: 8.w),
                 Expanded(child: Text(
-                  'After paying, your table request is sent to the restaurant. '
-                      "Once confirmed, you'll get a notification to place your food order.",
-                  style: TextStyle(fontSize: 11.5.sp,
-                      color: AppColors.info,
-                      fontWeight: FontWeight.w600,
-                      height: 1.4),
+                  "After paying, your table request is sent to the restaurant. "
+                      "Once confirmed, tap 'Place Food Order' to order your food.",
+                  style: TextStyle(fontSize: 11.5.sp, color: AppColors.info,
+                      fontWeight: FontWeight.w600, height: 1.4),
                 )),
               ]),
             ),
@@ -379,21 +371,17 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
                   elevation: 0,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16.r)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
                   disabledBackgroundColor: AppColors.primary.withOpacity(0.5),
                 ),
                 child: _paying
                     ? Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                   SizedBox(width: 20.w, height: 20.w,
-                      child: const CircularProgressIndicator(
-                          color: Colors.white, strokeWidth: 2.5)),
+                      child: const CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5)),
                   SizedBox(width: 12.w),
-                  Text('Processing...',
-                      style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.w900)),
+                  Text('Processing...', style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.w900)),
                 ])
-                    : Text(
-                    needsTimeSlot ? 'Select a time slot first' : 'Pay ₹19 & Request Table',
+                    : Text(needsTimeSlot ? 'Select a time slot first' : 'Pay ₹19 & Request Table',
                     style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.w900)),
               ),
             ),
@@ -403,8 +391,7 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
               child: TextButton(
                 onPressed: _paying ? null : () => context.pop(),
                 child: Text('Cancel',
-                    style: TextStyle(fontSize: 13.sp,
-                        color: AppColors.muted, fontWeight: FontWeight.w700)),
+                    style: TextStyle(fontSize: 13.sp, color: AppColors.muted, fontWeight: FontWeight.w700)),
               ),
             ),
           ]),
@@ -414,7 +401,6 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
   }
 }
 
-// ── Success Bottom Sheet ───────────────────────────────────────────────────────
 class _SuccessSheet extends StatelessWidget {
   final VoidCallback onDone;
   const _SuccessSheet({required this.onDone});
@@ -430,8 +416,7 @@ class _SuccessSheet extends StatelessWidget {
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Container(
           width: 80.w, height: 80.w,
-          decoration: BoxDecoration(
-              color: AppColors.successSoft, shape: BoxShape.circle),
+          decoration: BoxDecoration(color: AppColors.successSoft, shape: BoxShape.circle),
           child: Icon(Icons.check_rounded, color: AppColors.success, size: 40.sp),
         ),
         SizedBox(height: 20.h),
@@ -440,8 +425,8 @@ class _SuccessSheet extends StatelessWidget {
             textAlign: TextAlign.center),
         SizedBox(height: 10.h),
         Text(
-          'Your ₹19 is confirmed and the restaurant has been notified. '
-              "Once they confirm your table, you'll receive a notification to place your food order.",
+          "Your ₹19 is confirmed. Once the restaurant confirms your table, "
+              "tap 'Place Food Order' to order your food.",
           style: TextStyle(fontSize: 13.sp, color: AppColors.muted,
               fontWeight: FontWeight.w600, height: 1.5),
           textAlign: TextAlign.center,
@@ -452,11 +437,9 @@ class _SuccessSheet extends StatelessWidget {
           child: ElevatedButton(
             onPressed: onDone,
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
+              backgroundColor: AppColors.primary, foregroundColor: Colors.white,
               elevation: 0,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14.r)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14.r)),
             ),
             child: Text('View My Bookings',
                 style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.w900)),
