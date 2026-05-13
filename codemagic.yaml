@@ -1,0 +1,71 @@
+workflows:
+  ios-release:
+    name: iOS Release
+    max_build_duration: 60
+    environment:
+      flutter: 3.27.4
+      xcode: latest
+      cocoapods: default
+      vars:
+        BUNDLE_ID: "com.back2eat.app"
+        APP_STORE_CONNECT_ISSUER_ID: "d95ac0e8-13b5-41c3-b736-d4d1c0bd2c5d"
+        APP_STORE_CONNECT_KEY_IDENTIFIER: "CC37439SF5"
+        APPLE_TEAM_ID: "KAH5DBK3X2"
+      app_store_connect:
+        auth: integration
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.back2eat.app
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+    scripts:
+      - name: Flutter pub get
+        script: flutter packages pub get
+
+      - name: Pod install
+        script: |
+          find . -name "Podfile" -execdir pod install \;
+
+      - name: Build iOS IPA
+        script: |
+          flutter build ipa --release \
+            --export-options-plist=/Users/builder/export_options.plist
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+
+  android-release:
+    name: Android Release
+    max_build_duration: 60
+    environment:
+      flutter: 3.27.4
+      android_signing:
+        - back2eat_keystore
+      vars:
+        PACKAGE_NAME: "com.back2eat.app"
+    scripts:
+      - name: Flutter pub get
+        script: flutter packages pub get
+
+      - name: Build Android AAB
+        script: |
+          flutter build appbundle --release
+
+    artifacts:
+      - build/app/outputs/bundle/release/app-release.aab
+
+    publishing:
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: alpha
+        submit_as_draft: true
