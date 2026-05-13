@@ -54,6 +54,11 @@ class NotificationService {
         alert: true, badge: true, sound: true,
         provisional: false,
       );
+      await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
       debugPrint('[FCM] Permission: ${settings.authorizationStatus}');
 
       // 2. Create Android notification channel
@@ -116,11 +121,26 @@ class NotificationService {
 
   // ── Register token after login ─────────────────────────────────────────────
   Future<void> registerTokenAfterLogin() async {
+    // iOS: APNs token must be available before FCM token
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      String? apnsToken;
+      for (int i = 0; i < 10; i++) {
+        apnsToken = await FirebaseMessaging.instance.getAPNSToken();
+        if (apnsToken != null) break;
+        await Future.delayed(const Duration(seconds: 1));
+      }
+      debugPrint('[FCM] APNs Token: $apnsToken');
+      if (apnsToken == null) {
+        debugPrint('[FCM] APNs token is null — iOS push will not work');
+        return;
+      }
+    }
+
     for (int attempt = 1; attempt <= 3; attempt++) {
       try {
         final token = await _messaging.getToken();
         if (token == null) {
-          debugPrint('[FCM] Token is null — permissions may be denied');
+          debugPrint('[FCM] FCM Token is null');
           return;
         }
         await _registerToken(token);
@@ -130,8 +150,7 @@ class NotificationService {
         if (attempt < 3) await Future.delayed(Duration(seconds: attempt * 2));
       }
     }
-  }
-  Future<void> _registerToken(String token) async {
+  }  Future<void> _registerToken(String token) async {
     try {
       await getIt<ApiClient>().patch('/auth/fcm-token', {'fcmToken': token});
       debugPrint('[FCM] Token registered: ${token.substring(0, 20)}…');
