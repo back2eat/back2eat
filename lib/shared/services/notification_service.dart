@@ -1,3 +1,6 @@
+// 📱 CUSTOMER APP
+// lib/shared/services/notification_service.dart
+
 import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -12,75 +15,43 @@ class NotificationService {
   NotificationService._();
   static final NotificationService instance = NotificationService._();
 
-  // ── LAZY getter — only accessed AFTER Firebase.initializeApp() ────────────
   FirebaseMessaging get _messaging => FirebaseMessaging.instance;
-
   final _localNotifs = FlutterLocalNotificationsPlugin();
 
   static const _channelId   = 'back2eat_orders';
   static const _channelName = 'Back2Eat Order Updates';
 
-  /// Set by app_router after router is built — needed for tap navigation
   GlobalKey<NavigatorState>? navigatorKey;
 
-  /// Stream that order-tracking page listens to for silent refreshes
   final _orderUpdateController = StreamController<String>.broadcast();
   Stream<String> get orderUpdateStream => _orderUpdateController.stream;
 
   bool _initialised = false;
 
-  // ── Notification templates ─────────────────────────────────────────────────
-  static const _typeConfig = {
-    'ORDER_ACCEPTED':    ('Order Accepted! 🎉',       'Your order has been accepted by the restaurant.'),
-    'ORDER_PREPARING':   ('Being Prepared 👨‍🍳',       'The kitchen is preparing your order now.'),
-    'ORDER_READY':       ('Order Ready! 🍽️',           'Your order is ready. Please collect it!'),
-    'ORDER_CANCELLED':   ('Order Cancelled ❌',        'Your order was cancelled.'),
-    'ORDER_STATUS':      ('Order Update 🔔',           null),
-    'BOOKING_CONFIRMED': ('Booking Confirmed! 🪑',     'Your table is confirmed. Please complete the ₹19 payment.'),
-    'BOOKING_CANCELLED': ('Booking Cancelled',         'Your table booking was cancelled by the restaurant.'),
-    'PAYMENT_SUCCESS':   ('Payment Successful ✅',     'Your payment was processed successfully.'),
-    'LUCKY_DRAW_WIN':    ('🎉 You Won the Lucky Draw!', 'Your prize has been added to your wallet!'),
-    'LUCKY_DRAW_TICKET': ('🎟️ Lucky Draw Ticket!',     'Your ticket is entered in the draw. Good luck!'),
-  };
-
-  // ── Init — called from main() AFTER Firebase.initializeApp() ─────────────
   Future<void> init() async {
     if (_initialised) return;
     _initialised = true;
-
     try {
-      // 1. Request permission
       final settings = await _messaging.requestPermission(
-        alert: true, badge: true, sound: true,
-        provisional: false,
+        alert: true, badge: true, sound: true, provisional: false,
       );
       await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
-        alert: true,
-        badge: true,
-        sound: true,
+        alert: true, badge: true, sound: true,
       );
       debugPrint('[FCM] Permission: ${settings.authorizationStatus}');
 
-      // 2. Create Android notification channel
       const channel = AndroidNotificationChannel(
         _channelId, _channelName,
         description: 'Real-time order and booking updates',
-        importance: Importance.max,
-        playSound: true,
-        enableVibration: true,
+        importance: Importance.max, playSound: true, enableVibration: true,
       );
       await _localNotifs
-          .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>()
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
           ?.createNotificationChannel(channel);
-
-      // 3. Android 13+ runtime notification permission
       await _localNotifs
-          .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>()
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
           ?.requestNotificationsPermission();
 
-      // 4. Init local notifications plugin
       const initSettings = InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
         iOS: DarwinInitializationSettings(
@@ -89,18 +60,12 @@ class NotificationService {
           requestSoundPermission: true,
         ),
       );
-      await _localNotifs.initialize(
-        initSettings,
-        onDidReceiveNotificationResponse: _onLocalNotifTap,
-      );
+      await _localNotifs.initialize(initSettings,
+          onDidReceiveNotificationResponse: _onLocalNotifTap);
 
-      // 5. Foreground FCM messages
       FirebaseMessaging.onMessage.listen(_onForegroundMessage);
-
-      // 6. App brought to foreground by tapping notification
       FirebaseMessaging.onMessageOpenedApp.listen(_onMessageOpenedApp);
 
-      // 7. App launched from terminated state via notification tap
       final initialMessage = await _messaging.getInitialMessage();
       if (initialMessage != null) {
         Future.delayed(const Duration(milliseconds: 1000), () {
@@ -108,20 +73,15 @@ class NotificationService {
         });
       }
 
-      // 8. Token refresh — re-register with backend
       _messaging.onTokenRefresh.listen(_registerToken);
-
-      // 9. Register current token
       await registerTokenAfterLogin();
-
     } catch (e) {
       debugPrint('[FCM] init error: $e');
     }
   }
 
-  // ── Register token after login ─────────────────────────────────────────────
   Future<void> registerTokenAfterLogin() async {
-    // iOS: APNs token must be available before FCM token
+    // iOS: wait for APNs token before getting FCM token
     if (defaultTargetPlatform == TargetPlatform.iOS) {
       String? apnsToken;
       for (int i = 0; i < 10; i++) {
@@ -135,14 +95,10 @@ class NotificationService {
         return;
       }
     }
-
     for (int attempt = 1; attempt <= 3; attempt++) {
       try {
         final token = await _messaging.getToken();
-        if (token == null) {
-          debugPrint('[FCM] FCM Token is null');
-          return;
-        }
+        if (token == null) { debugPrint('[FCM] FCM Token is null'); return; }
         await _registerToken(token);
         return;
       } catch (e) {
@@ -150,23 +106,23 @@ class NotificationService {
         if (attempt < 3) await Future.delayed(Duration(seconds: attempt * 2));
       }
     }
-  }  Future<void> _registerToken(String token) async {
+  }
+
+  Future<void> _registerToken(String token) async {
     try {
       await getIt<ApiClient>().patch('/auth/fcm-token', {'fcmToken': token});
-      debugPrint('[FCM] Token registered: ${token.substring(0, 20)}…');
+      debugPrint('[FCM] Token registered: ${token.substring(0, 20)}...');
     } catch (e) {
       debugPrint('[FCM] Token registration error: $e');
     }
   }
 
-  // ── Background message handler ─────────────────────────────────────────────
   Future<void> handleBackgroundMessage(RemoteMessage message) async {
     await _showLocalNotification(message);
   }
 
-  // ── Foreground message ─────────────────────────────────────────────────────
   Future<void> _onForegroundMessage(RemoteMessage message) async {
-    debugPrint('[FCM] Foreground: type=${message.data["type"]} orderId=${message.data["orderId"]}');
+    debugPrint('[FCM] Foreground: type=${message.data["type"]}');
     await _showLocalNotification(message);
     final orderId = message.data['orderId'] as String?;
     if (orderId != null && orderId.isNotEmpty) {
@@ -174,110 +130,87 @@ class NotificationService {
     }
   }
 
-  // ── App opened from background notification ────────────────────────────────
   void _onMessageOpenedApp(RemoteMessage message) {
     debugPrint('[FCM] Opened from background: ${message.data}');
     _routeFromMessage(message.data);
   }
 
-  // ── Local notification tap ─────────────────────────────────────────────────
   void _onLocalNotifTap(NotificationResponse response) {
     final payload = response.payload;
     if (payload == null || payload.isEmpty) return;
-    debugPrint('[FCM] Local notif tapped, payload: $payload');
-    if (payload.startsWith('order:')) {
-      _navigateToOrder(payload.substring(6));
-    } else if (payload.startsWith('booking:')) {
-      _navigateToBookingPayment(payload.substring(8));
-    } else {
-      _navigateToOrder(payload);
-    }
+    if (payload.startsWith('order:'))        _navigateToOrder(payload.substring(6));
+    else if (payload.startsWith('booking:')) _navigateToBookings();
+    else                                     _navigateToOrder(payload);
   }
 
-  // ── Route from FCM data ────────────────────────────────────────────────────
   void _routeFromMessage(Map<String, dynamic> data) {
     final type    = data['type']    as String? ?? '';
     final orderId = data['orderId'] as String? ?? '';
-
-    if (type == 'BOOKING_CONFIRMED') {
-      final bookingId = data['bookingId'] as String? ?? '';
-      if (bookingId.isNotEmpty) _navigateToBookingPayment(bookingId);
+    if (type == 'BOOKING_CONFIRMED' || type == 'BOOKING_CANCELLED') {
+      _navigateToBookings();
       return;
     }
-    if (orderId.isNotEmpty) {
-      _navigateToOrder(orderId);
-    }
+    if (orderId.isNotEmpty) _navigateToOrder(orderId);
   }
 
-  // ── Show local notification ────────────────────────────────────────────────
   Future<void> _showLocalNotification(RemoteMessage message) async {
-    final type   = message.data['type'] as String? ?? '';
-    final config = _typeConfig[type];
-
-    String title = config?.$1 ?? message.notification?.title ?? 'Back2Eat';
-    String body;
-    if (config?.$2 != null) {
-      body = config!.$2!;
-    } else {
-      body = message.notification?.body ?? '';
-    }
-
-    final orderNumber = message.data['orderNumber'] as String?;
-    if (orderNumber != null && type != 'ORDER_STATUS') {
-      body = '#$orderNumber — $body';
-    }
+    // Use FCM title/body directly — backend now sends restaurant name in title
+    // so we don't override with local hardcoded strings
+    final title = message.notification?.title
+        ?? _fallbackTitle(message.data['type'] as String?);
+    final body  = message.notification?.body ?? '';
 
     final orderId   = message.data['orderId']   as String?;
     final bookingId = message.data['bookingId'] as String?;
 
     String payload = '';
-    if (orderId != null && orderId.isNotEmpty) {
-      payload = 'order:$orderId';
-    } else if (bookingId != null && bookingId.isNotEmpty) {
-      payload = 'booking:$bookingId';
-    }
+    if (orderId   != null && orderId.isNotEmpty)   payload = 'order:$orderId';
+    else if (bookingId != null && bookingId.isNotEmpty) payload = 'booking:$bookingId';
 
     final notifId = (orderId ?? bookingId ?? message.messageId ?? '')
-        .hashCode
-        .abs() % 100000;
+        .hashCode.abs() % 100000;
 
     await _localNotifs.show(
-      notifId,
-      title,
-      body,
+      notifId, title, body,
       NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId, _channelName,
           channelDescription: 'Real-time order and booking updates',
-          importance: Importance.max,
-          priority:   Priority.high,
-          playSound:  true,
-          enableVibration: true,
+          importance: Importance.max, priority: Priority.high,
+          playSound: true, enableVibration: true,
           icon: '@mipmap/ic_launcher',
         ),
         iOS: const DarwinNotificationDetails(
-          presentAlert: true,
-          presentBadge: true,
-          presentSound: true,
+          presentAlert: true, presentBadge: true, presentSound: true,
         ),
       ),
       payload: payload,
     );
   }
 
-  // ── Navigation helpers ─────────────────────────────────────────────────────
+  // Fallback titles when FCM notification block is absent (data-only messages)
+  String _fallbackTitle(String? type) {
+    switch (type) {
+      case 'ORDER_ACCEPTED':    return 'Order Accepted! 🎉';
+      case 'ORDER_PREPARING':   return 'Being Prepared 👨‍🍳';
+      case 'ORDER_READY':       return 'Order Ready! 🍽️';
+      case 'ORDER_CANCELLED':   return 'Order Cancelled ❌';
+      case 'BOOKING_CONFIRMED': return 'Booking Confirmed! 🪑';
+      case 'BOOKING_CANCELLED': return 'Booking Cancelled';
+      case 'PAYMENT_SUCCESS':   return 'Payment Successful ✅';
+      default:                  return 'Back2Eat 🔔';
+    }
+  }
+
   void _navigateToOrder(String orderId) {
     final ctx = navigatorKey?.currentContext;
-    if (ctx == null) {
-      debugPrint('[FCM] navigatorKey context is null — cannot navigate');
-      return;
-    }
+    if (ctx == null) { debugPrint('[FCM] navigatorKey context is null'); return; }
     GoRouter.of(ctx).push('/order-tracking', extra: orderId);
   }
 
-  void _navigateToBookingPayment(String bookingId) {
+  void _navigateToBookings() {
     final ctx = navigatorKey?.currentContext;
     if (ctx == null) return;
-    GoRouter.of(ctx).push('/booking-payment', extra: bookingId);
+    GoRouter.of(ctx).go('/bookings');
   }
 }
