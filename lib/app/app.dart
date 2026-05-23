@@ -1,4 +1,5 @@
-
+// 📱 CUSTOMER APP
+// lib/app.dart
 
 import 'package:flutter/material.dart';
 import '../core/theme/app_theme.dart';
@@ -34,10 +35,8 @@ class _Back2EatAppState extends State<Back2EatApp> {
               textScaler: TextScaler.noScaling,
             ),
             child: SafeArea(
-              // top: true  — protects from status bar / notch
-              // bottom: false — bottom sheets and nav handle their own padding
-              top: true,
-              bottom: false,
+              top:    false, // ← no top — app handles status bar itself
+              bottom: true,  // ← bottom only — prevents content going behind nav bar
               child: child!,
             ),
           );
