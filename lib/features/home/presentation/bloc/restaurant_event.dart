@@ -1,10 +1,12 @@
-abstract class RestaurantEvent {
-  const RestaurantEvent();
-}
+// 📱 CUSTOMER APP
+// lib/features/home/presentation/bloc/restaurant_event.dart
+
+abstract class RestaurantEvent { const RestaurantEvent(); }
 
 class LoadRestaurantsEvent extends RestaurantEvent {
   final String? search;
-  const LoadRestaurantsEvent({this.search});
+  final String? city;   // ← filter by city
+  const LoadRestaurantsEvent({this.search, this.city});
 }
 
 class LoadRestaurantDetailEvent extends RestaurantEvent {

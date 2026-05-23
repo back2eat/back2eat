@@ -1,3 +1,6 @@
+// 📱 CUSTOMER APP
+// lib/features/home/data/repositories/restaurant_repository_impl.dart
+
 import '../../domain/entities/menu_item.dart';
 import '../../domain/entities/restaurant.dart';
 import '../../domain/repositories/restaurant_repository.dart';
@@ -8,8 +11,8 @@ class RestaurantRepositoryImpl implements RestaurantRepository {
   RestaurantRepositoryImpl(this.ds);
 
   @override
-  Future<List<Restaurant>> getRestaurants({String? search}) =>
-      ds.getRestaurants(search: search);
+  Future<List<Restaurant>> getRestaurants({String? search, String? city}) =>
+      ds.getRestaurants(search: search, city: city);
 
   @override
   Future<(Restaurant, String?, List<MenuItem>)> getRestaurantDetail(

@@ -1,3 +1,5 @@
+
+
 import 'package:flutter/material.dart';
 import '../core/theme/app_theme.dart';
 import '../shared/utils/location_permission_helper.dart';
@@ -15,7 +17,6 @@ class _Back2EatAppState extends State<Back2EatApp> {
   @override
   void initState() {
     super.initState();
-
   }
 
   @override
@@ -26,6 +27,21 @@ class _Back2EatAppState extends State<Back2EatApp> {
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light(),
         routerConfig: AppRouter.router,
+        builder: (context, child) {
+          return MediaQuery(
+            // Prevent system font size from breaking UI layout
+            data: MediaQuery.of(context).copyWith(
+              textScaler: TextScaler.noScaling,
+            ),
+            child: SafeArea(
+              // top: true  — protects from status bar / notch
+              // bottom: false — bottom sheets and nav handle their own padding
+              top: true,
+              bottom: false,
+              child: child!,
+            ),
+          );
+        },
       ),
     );
   }

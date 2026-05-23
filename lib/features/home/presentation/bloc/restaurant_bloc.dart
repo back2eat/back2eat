@@ -1,3 +1,6 @@
+// 📱 CUSTOMER APP
+// lib/features/home/presentation/bloc/restaurant_bloc.dart
+
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../domain/repositories/restaurant_repository.dart';
 import 'restaurant_event.dart';
@@ -16,7 +19,7 @@ class RestaurantBloc extends Bloc<RestaurantEvent, RestaurantState> {
     emit(const RestaurantLoading());
     try {
       final results = await Future.wait([
-        repo.getRestaurants(search: event.search),
+        repo.getRestaurants(search: event.search, city: event.city), // ← pass city
         repo.getCategories(),
         repo.getFeaturedRestaurants(),
       ]);
