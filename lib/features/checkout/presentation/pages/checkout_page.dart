@@ -1,6 +1,5 @@
 // 📱 CUSTOMER APP
 // lib/features/checkout/presentation/pages/checkout_page.dart
-// pubspec.yaml: razorpay_flutter: ^1.3.7
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -61,11 +60,11 @@ class _CheckoutView extends StatefulWidget {
 
 class _CheckoutViewState extends State<_CheckoutView> {
   String? _selectedTime;
-  int     _guestCount    = 1;
-  bool    _isSubmitting  = false;
+  int     _guestCount   = 1;
+  bool    _isSubmitting = false;
   late List<String> _timeSlots;
 
-  final _couponCtrl    = TextEditingController();
+  final _couponCtrl = TextEditingController();
   bool    _applyingCoupon = false;
   String? _appliedCode;
   double  _discountAmount = 0.0;
@@ -78,17 +77,9 @@ class _CheckoutViewState extends State<_CheckoutView> {
   bool   _usePoints        = false;
   double _pointsDiscount   = 0.0;
 
-  // ── Razorpay ──────────────────────────────────────────────────────────────
+  // Razorpay
   late Razorpay _razorpay;
-
-  // Stored during payment so we can use in callbacks
-  CartState?  _pendingCart;
-  OrderType?  _pendingOrderType;
-  double?     _pendingSubtotal;
-  double?     _pendingCommission;
-  double?     _pendingTotal;
-  int?        _pendingGuestCount;
-  int         _pendingPointsToRedeem = 0;
+  String? _pendingOrderId; // our order ID stored for verification
 
   int    get _pointsToRedeem => _usePoints ? (_pointsDiscount / _pointsValuePerPt).round() : 0;
   double get _totalSavings   => _discountAmount + _pointsDiscount;
@@ -98,10 +89,6 @@ class _CheckoutViewState extends State<_CheckoutView> {
     super.initState();
     _timeSlots = _buildTimeSlots();
     _loadPoints();
-    _initRazorpay();
-  }
-
-  void _initRazorpay() {
     _razorpay = Razorpay();
     _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
     _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR,   _onPaymentError);
@@ -172,7 +159,7 @@ class _CheckoutViewState extends State<_CheckoutView> {
     _couponError = null; _couponSuccess = null;
   });
 
-  // ── Step 1: Create Razorpay order on backend, open payment sheet ──────────
+  // ── Step 1: Place order → get orderId → create Razorpay order → open sheet ─
   Future<void> _initiatePayment(
       BuildContext context,
       CartState cart,
@@ -186,100 +173,84 @@ class _CheckoutViewState extends State<_CheckoutView> {
     if (_isSubmitting) return;
     setState(() => _isSubmitting = true);
 
-    // Store for use in payment callbacks
-    _pendingCart           = cart;
-    _pendingOrderType      = orderType;
-    _pendingSubtotal       = subtotal;
-    _pendingCommission     = commission;
-    _pendingTotal          = total;
-    _pendingGuestCount     = guestCount;
-    _pendingPointsToRedeem = pointsToRedeem;
-
     try {
-      // Create Razorpay order on backend
-      final res = await getIt<ApiClient>().post('/payments/create-order', {
-        'amount':  total,
-        'receipt': 'order_${DateTime.now().millisecondsSinceEpoch}',
-      });
+      // Place order first (paymentStatus: PENDING)
+      context.read<OrderBloc>().add(PlaceOrderEvent(
+        restaurantId:     cart.items.first.restaurantId,
+        branchId:         cart.items.first.branchId,
+        orderType:        orderType,
+        cartItems:        cart.items,
+        scheduledTime:    _selectedTime,
+        guestCount:       guestCount,
+        couponCode:       _appliedCode,
+        pointsRedeemed:   pointsToRedeem > 0 ? pointsToRedeem : null,
+        subtotal:         subtotal,
+        commissionAmount: commission,
+        bookingFee:       0,
+        totalAmount:      total,
+      ));
+      // OrderBloc listener will call _openRazorpay once order is placed
+    } catch (e) {
+      setState(() => _isSubmitting = false);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(e.toString().replaceAll('Exception:', '').trim()),
+        backgroundColor: AppColors.danger, behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
+  // ── Step 2: Order placed → create Razorpay order → open payment sheet ──────
+  Future<void> _openRazorpay(String orderId, double total) async {
+    _pendingOrderId = orderId;
+    try {
+      final res = await getIt<ApiClient>().post(
+        '/payments/create-order',
+        {'orderId': orderId},
+      );
 
       final razorpayOrderId = res['razorpayOrderId'] as String;
-      final keyId           = res['keyId']           as String;
       final amountInPaise   = res['amount']          as int;
+      final keyId           = res['keyId']           as String;
 
-      // Open Razorpay payment sheet
       final options = {
         'key':         keyId,
         'amount':      amountInPaise,
         'order_id':    razorpayOrderId,
         'name':        'Back2Eat',
         'description': 'Food Order Payment',
-        'image':       'https://back2eat-api.onrender.com/assets/logo.png',
-        'prefill': {
-          'contact': '', // will auto-fill from Razorpay account
-          'email':   '',
-        },
-        'theme': {
-          'color': '#D01008',
-        },
-        'retry': {
-          'enabled': false,
-        },
+        'theme':       {'color': '#D01008'},
+        'retry':       {'enabled': false},
       };
 
       _razorpay.open(options);
     } catch (e) {
       setState(() => _isSubmitting = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Payment failed: ${e.toString().replaceAll("Exception:", "").trim()}'),
-          backgroundColor: AppColors.danger,
-          behavior: SnackBarBehavior.floating,
-        ));
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Payment setup failed: ${e.toString().replaceAll("Exception:", "").trim()}'),
+        backgroundColor: AppColors.danger, behavior: SnackBarBehavior.floating,
+      ));
     }
   }
 
-  // ── Step 2: Payment success → verify + place order ────────────────────────
+  // ── Step 3: Payment success → verify ─────────────────────────────────────
   void _onPaymentSuccess(PaymentSuccessResponse response) async {
-    if (!mounted) return;
-
-    final cart      = _pendingCart;
-    final orderType = _pendingOrderType;
-    if (cart == null || orderType == null) return;
-
-    String orderTypeStr;
-    switch (orderType) {
-      case OrderType.dineIn:       orderTypeStr = 'DINE_IN';   break;
-      case OrderType.tableBooking: orderTypeStr = 'TABLE_BOOKING'; break;
-      case OrderType.takeAway:
-      default:                     orderTypeStr = 'TAKEAWAY';
-    }
-
-    final items = cart.items.map((c) => {
-      'menuItemId': c.menuItemId,
-      'name':       c.name,
-      'quantity':   c.qty,
-      'price':      c.price,
-    }).toList();
-
-    // Dispatch verify + place order event
-    if (mounted) {
-      context.read<OrderBloc>().add(VerifyAndPlaceOrderEvent(
-        razorpayOrderId:   response.orderId   ?? '',
-        razorpayPaymentId: response.paymentId ?? '',
-        razorpaySignature: response.signature ?? '',
-        restaurantId:      cart.items.first.restaurantId,
-        branchId:          cart.items.first.branchId,
-        orderType:         orderType,
-        cartItems:         cart.items,
-        scheduledTime:     _selectedTime,
-        guestCount:        _pendingGuestCount,
-        couponCode:        _appliedCode,
-        pointsRedeemed:    _pendingPointsToRedeem > 0 ? _pendingPointsToRedeem : null,
-        subtotal:          _pendingSubtotal,
-        commissionAmount:  _pendingCommission,
-        bookingFee:        0,
-        totalAmount:       _pendingTotal,
+    if (!mounted || _pendingOrderId == null) return;
+    try {
+      await getIt<ApiClient>().post('/payments/verify', {
+        'orderId':           _pendingOrderId!,
+        'razorpayOrderId':   response.orderId   ?? '',
+        'razorpayPaymentId': response.paymentId ?? '',
+        'razorpaySignature': response.signature ?? '',
+      });
+      if (mounted) {
+        context.read<CartBloc>().add(const ClearCartEvent());
+        context.go('/order-tracking', extra: _pendingOrderId!);
+      }
+    } catch (e) {
+      setState(() => _isSubmitting = false);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Payment done but verification failed. Contact support.'),
+        backgroundColor: AppColors.warning, behavior: SnackBarBehavior.floating,
       ));
     }
   }
@@ -288,22 +259,14 @@ class _CheckoutViewState extends State<_CheckoutView> {
   void _onPaymentError(PaymentFailureResponse response) {
     setState(() => _isSubmitting = false);
     if (!mounted) return;
-    final msg = response.message ?? 'Payment failed. Please try again.';
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      backgroundColor: AppColors.danger,
-      behavior: SnackBarBehavior.floating,
+      content: Text(response.message ?? 'Payment failed. Please try again.'),
+      backgroundColor: AppColors.danger, behavior: SnackBarBehavior.floating,
     ));
   }
 
-  // ── External wallet selected ──────────────────────────────────────────────
   void _onExternalWallet(ExternalWalletResponse response) {
     setState(() => _isSubmitting = false);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('External wallet: ${response.walletName}'),
-      behavior: SnackBarBehavior.floating,
-    ));
   }
 
   @override
@@ -313,16 +276,14 @@ class _CheckoutViewState extends State<_CheckoutView> {
     return BlocListener<OrderBloc, OrderState>(
       listener: (context, state) {
         if (state is OrderPlaced) {
-          setState(() => _isSubmitting = false);
-          context.read<CartBloc>().add(const ClearCartEvent());
-          context.go('/order-tracking', extra: state.order.id);
+          // Order created — now open Razorpay payment sheet
+          _openRazorpay(state.order.id, state.order.totalAmount);
         }
         if (state is OrderError) {
           setState(() => _isSubmitting = false);
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(state.message),
-            backgroundColor: AppColors.danger,
-            behavior: SnackBarBehavior.floating,
+            backgroundColor: AppColors.danger, behavior: SnackBarBehavior.floating,
           ));
         }
       },
@@ -363,7 +324,6 @@ class _CheckoutViewState extends State<_CheckoutView> {
                             padding: EdgeInsets.fromLTRB(16.w, 14.h, 16.w, 0),
                             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-                              // ORDER TYPE
                               _SectionTitle(title: 'Order Type'),
                               SizedBox(height: 10.h),
                               _Card(child: Row(children: [
@@ -385,7 +345,6 @@ class _CheckoutViewState extends State<_CheckoutView> {
                                 _PillButton(text: 'Change', onTap: () => _showOrderTypeSheet(context, effectiveType)),
                               ])),
 
-                              // TIME SLOT
                               SizedBox(height: 12.h),
                               _SectionTitle(title: 'Select Time Slot'),
                               SizedBox(height: 10.h),
@@ -434,7 +393,6 @@ class _CheckoutViewState extends State<_CheckoutView> {
                                 ],
                               ])),
 
-                              // GUEST COUNT
                               if (needsGuests) ...[
                                 SizedBox(height: 12.h),
                                 _SectionTitle(title: 'Number of Guests'),
@@ -474,7 +432,6 @@ class _CheckoutViewState extends State<_CheckoutView> {
                                 ])),
                               ],
 
-                              // COUPON
                               SizedBox(height: 12.h),
                               _SectionTitle(title: 'Coupon / Offer'),
                               SizedBox(height: 10.h),
@@ -539,34 +496,30 @@ class _CheckoutViewState extends State<_CheckoutView> {
                                 ],
                               ])),
 
-                              // POINTS
                               if (_pointsBalance > 0) ...[
                                 SizedBox(height: 12.h),
                                 _SectionTitle(title: 'Back2Eat Points'),
                                 SizedBox(height: 10.h),
-                                _Card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                  Row(children: [
-                                    Container(
-                                      width: 40.w, height: 40.w,
-                                      decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.10), borderRadius: BorderRadius.circular(12.r)),
-                                      child: Icon(Icons.stars_rounded, color: AppColors.primary, size: 20.sp),
+                                _Card(child: Row(children: [
+                                  Container(
+                                    width: 40.w, height: 40.w,
+                                    decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.10), borderRadius: BorderRadius.circular(12.r)),
+                                    child: Icon(Icons.stars_rounded, color: AppColors.primary, size: 20.sp),
+                                  ),
+                                  SizedBox(width: 12.w),
+                                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                    Text('$_pointsBalance pts  ·  ₹${(_pointsBalance * _pointsValuePerPt).toStringAsFixed(0)} value',
+                                        style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w900)),
+                                    Text(
+                                      _usePoints ? 'Saving ₹${_pointsDiscount.toStringAsFixed(0)} on this order' : 'Tap to apply points',
+                                      style: TextStyle(fontSize: 11.sp, fontWeight: FontWeight.w700,
+                                          color: _usePoints ? AppColors.success : AppColors.muted),
                                     ),
-                                    SizedBox(width: 12.w),
-                                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                      Text('$_pointsBalance pts  ·  ₹${(_pointsBalance * _pointsValuePerPt).toStringAsFixed(0)} value',
-                                          style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w900)),
-                                      Text(
-                                        _usePoints ? 'Saving ₹${_pointsDiscount.toStringAsFixed(0)} on this order' : 'Tap to apply points',
-                                        style: TextStyle(fontSize: 11.sp, fontWeight: FontWeight.w700,
-                                            color: _usePoints ? AppColors.success : AppColors.muted),
-                                      ),
-                                    ])),
-                                    Switch(value: _usePoints, activeColor: AppColors.primary, onChanged: (_) => _togglePoints(subtotal)),
-                                  ]),
+                                  ])),
+                                  Switch(value: _usePoints, activeColor: AppColors.primary, onChanged: (_) => _togglePoints(subtotal)),
                                 ])),
                               ],
 
-                              // ORDER SUMMARY
                               SizedBox(height: 12.h),
                               _SectionTitle(title: 'Order Summary'),
                               SizedBox(height: 10.h),
@@ -654,7 +607,7 @@ class _CheckoutViewState extends State<_CheckoutView> {
                           ),
                         ),
 
-                        // ── Sticky bottom CTA ──────────────────────────────
+                        // STICKY CTA
                         Container(
                           padding: EdgeInsets.fromLTRB(16.w, 12.h, 16.w, 14.h),
                           decoration: BoxDecoration(
@@ -768,7 +721,6 @@ class _CheckoutViewState extends State<_CheckoutView> {
   }
 }
 
-// ── Supporting widgets (unchanged) ────────────────────────────────────────────
 class _BillRow extends StatelessWidget {
   final String label; final double value; final NumberFormat currency; final Color? labelColor;
   const _BillRow({required this.label, required this.value, required this.currency, this.labelColor});

@@ -1,3 +1,6 @@
+// 📱 CUSTOMER APP
+// lib/features/orders/domain/repositories/order_repository.dart
+
 import '../entities/order.dart';
 
 abstract class OrderRepository {
@@ -9,26 +12,6 @@ abstract class OrderRepository {
     String? tableId,
     String? specialInstructions,
     String  paymentMethod = 'UPI',
-    String? scheduledTime,
-    int?    guestCount,
-    String? couponCode,
-    int?    pointsRedeemed,
-    double? subtotal,
-    double? commissionAmount,
-    double? bookingFee,
-    double? totalAmount,
-  });
-
-  // ── Razorpay: verify payment + place order ────────────────────────────────
-  Future<OrderEntity> verifyAndPlaceOrder({
-    required String razorpayOrderId,
-    required String razorpayPaymentId,
-    required String razorpaySignature,
-    required String restaurantId,
-    required String branchId,
-    required String orderType,
-    required List<Map<String, dynamic>> items,
-    String? specialInstructions,
     String? scheduledTime,
     int?    guestCount,
     String? couponCode,

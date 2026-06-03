@@ -1,6 +1,5 @@
 // 📱 CUSTOMER APP
 // lib/features/orders/presentation/bloc/order_event.dart
-// ADD VerifyAndPlaceOrderEvent to existing file
 
 import 'package:equatable/equatable.dart';
 import '../../../cart/presentation/bloc/cart_state.dart';
@@ -48,53 +47,6 @@ class PlaceOrderEvent extends OrderEvent {
     restaurantId, branchId, orderType, cartItems,
     specialInstructions, scheduledTime, guestCount, couponCode,
     pointsRedeemed, subtotal, commissionAmount, bookingFee, totalAmount,
-  ];
-}
-
-// ── NEW: Razorpay payment verified — place order ──────────────────────────────
-class VerifyAndPlaceOrderEvent extends OrderEvent {
-  // Razorpay payment details
-  final String razorpayOrderId;
-  final String razorpayPaymentId;
-  final String razorpaySignature;
-  // Order details
-  final String         restaurantId;
-  final String         branchId;
-  final OrderType      orderType;
-  final List<CartLine> cartItems;
-  final String?        specialInstructions;
-  final String?        scheduledTime;
-  final int?           guestCount;
-  final String?        couponCode;
-  final int?           pointsRedeemed;
-  final double?        subtotal;
-  final double?        commissionAmount;
-  final double?        bookingFee;
-  final double?        totalAmount;
-
-  const VerifyAndPlaceOrderEvent({
-    required this.razorpayOrderId,
-    required this.razorpayPaymentId,
-    required this.razorpaySignature,
-    required this.restaurantId,
-    required this.branchId,
-    required this.orderType,
-    required this.cartItems,
-    this.specialInstructions,
-    this.scheduledTime,
-    this.guestCount,
-    this.couponCode,
-    this.pointsRedeemed,
-    this.subtotal,
-    this.commissionAmount,
-    this.bookingFee,
-    this.totalAmount,
-  });
-
-  @override
-  List<Object?> get props => [
-    razorpayOrderId, razorpayPaymentId, razorpaySignature,
-    restaurantId, branchId, orderType, cartItems,
   ];
 }
 
