@@ -2,10 +2,6 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../storage/token_storage.dart';
 
-/// Central HTTP client for the customer app.
-/// - Attaches Bearer token automatically.
-/// - Retries once on 401 using stored refresh token.
-/// - Supports GET / POST / PATCH / DELETE + multipart uploads.
 class ApiClient {
   static const String baseUrl = 'https://back2eat-api.onrender.com/api/v1';
   static const _timeout = Duration(seconds: 20);
@@ -17,13 +13,11 @@ class ApiClient {
     final token = _storage.accessToken;
     return {
       'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      if (token != null) 'Authorization': 'Bearer $token',
-      if (restaurantId != null) 'x-restaurant-id': restaurantId,
+      'Accept':       'application/json',
+      if (token        != null) 'Authorization':    'Bearer $token',
+      if (restaurantId != null) 'x-restaurant-id':  restaurantId,
     };
   }
-
-  // ── Refresh token ──────────────────────────────────────────────────
 
   bool _refreshing = false;
 
@@ -33,20 +27,17 @@ class ApiClient {
     if (refresh == null) return false;
     _refreshing = true;
     try {
-      final res = await http
-          .post(
+      final res = await http.post(
         Uri.parse('$baseUrl/auth/refresh'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'refreshToken': refresh}),
-      )
-          .timeout(_timeout);
+      ).timeout(_timeout);
       if (res.statusCode == 200) {
-        final body = jsonDecode(res.body) as Map<String, dynamic>;
-        final access = body['accessToken'] as String?;
+        final body       = jsonDecode(res.body) as Map<String, dynamic>;
+        final access     = body['accessToken']  as String?;
         final newRefresh = body['refreshToken'] as String?;
         if (access != null && newRefresh != null) {
-          await _storage.saveTokens(
-              accessToken: access, refreshToken: newRefresh);
+          await _storage.saveTokens(accessToken: access, refreshToken: newRefresh);
           return true;
         }
       }
@@ -58,11 +49,9 @@ class ApiClient {
     }
   }
 
-  // ── Core request executor ──────────────────────────────────────────
-
   Future<Map<String, dynamic>> _exec(
       Future<http.Response> Function() request, {
-        bool retry = true,
+        bool    retry        = true,
         String? restaurantId,
       }) async {
     var res = await request().timeout(_timeout);
@@ -72,15 +61,11 @@ class ApiClient {
         res = await request().timeout(_timeout);
       } else {
         await _storage.clear();
-        throw ApiException(
-            message: 'Session expired. Please log in again.',
-            statusCode: 401);
+        throw ApiException(message: 'Session expired. Please log in again.', statusCode: 401);
       }
     }
     return _handle(res);
   }
-
-  // ── Public methods ─────────────────────────────────────────────────
 
   Future<Map<String, dynamic>> get(
       String path, {
@@ -89,9 +74,7 @@ class ApiClient {
       }) async {
     Uri uri = Uri.parse('$baseUrl$path');
     if (params != null && params.isNotEmpty) {
-      uri = uri.replace(
-          queryParameters:
-          params.map((k, v) => MapEntry(k, v.toString())));
+      uri = uri.replace(queryParameters: params.map((k, v) => MapEntry(k, v.toString())));
     }
     return _exec(
           () => http.get(uri, headers: _headers(restaurantId: restaurantId)),
@@ -103,14 +86,18 @@ class ApiClient {
       String path,
       Map<String, dynamic> body, {
         String? restaurantId,
-        bool auth = true,
+        bool    auth = true,
       }) async {
     final headers = auth
         ? _headers(restaurantId: restaurantId)
         : {'Content-Type': 'application/json', 'Accept': 'application/json'};
     return _exec(
-          () => http.post(Uri.parse('$baseUrl$path'),
-          headers: headers, body: jsonEncode(body)),
+          () => http.post(
+        Uri.parse('$baseUrl$path'),
+        headers: headers,
+        body: jsonEncode(body),
+      ),
+      restaurantId: restaurantId, // ← FIXED: was missing
     );
   }
 
@@ -120,9 +107,12 @@ class ApiClient {
         String? restaurantId,
       }) async {
     return _exec(
-          () => http.patch(Uri.parse('$baseUrl$path'),
-          headers: _headers(restaurantId: restaurantId),
-          body: jsonEncode(body)),
+          () => http.patch(
+        Uri.parse('$baseUrl$path'),
+        headers: _headers(restaurantId: restaurantId),
+        body: jsonEncode(body),
+      ),
+      restaurantId: restaurantId, // ← FIXED: was missing
     );
   }
 
@@ -132,19 +122,38 @@ class ApiClient {
     );
   }
 
-  // ── Response handler ───────────────────────────────────────────────
-
   Map<String, dynamic> _handle(http.Response res) {
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     if (res.statusCode >= 200 && res.statusCode < 300) return body;
     final msg = body['message'] as String? ?? 'Unknown error';
     throw ApiException(message: msg, statusCode: res.statusCode);
   }
+
+  // ── File upload ────────────────────────────────────────────────────────────
+  Future<String> uploadFile(
+      String path,
+      dynamic file, {
+        String field = 'file',
+        String? restaurantId,
+      }) async {
+    final token = _storage.accessToken;
+    final request = http.MultipartRequest('POST', Uri.parse('$baseUrl$path'));
+    if (token != null) request.headers['Authorization'] = 'Bearer $token';
+    if (restaurantId != null) request.headers['x-restaurant-id'] = restaurantId;
+    request.files.add(await http.MultipartFile.fromPath(field, file.path));
+    final streamed = await request.send().timeout(_timeout);
+    final res      = await http.Response.fromStream(streamed);
+    final body     = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      return body['url'] as String? ?? body['imageUrl'] as String? ?? '';
+    }
+    throw ApiException(message: body['message'] as String? ?? 'Upload failed', statusCode: res.statusCode);
+  }
 }
 
 class ApiException implements Exception {
   final String message;
-  final int statusCode;
+  final int    statusCode;
   ApiException({required this.message, required this.statusCode});
 
   @override
