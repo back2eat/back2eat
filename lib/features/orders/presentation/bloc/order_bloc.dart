@@ -1,3 +1,6 @@
+// 📱 CUSTOMER APP
+// lib/features/orders/presentation/bloc/order_bloc.dart
+
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../order_type/presentation/cubit/order_type_cubit.dart';
 import '../../domain/repositories/order_repository.dart';
@@ -10,6 +13,7 @@ class OrderBloc extends Bloc<OrderEvent, OrderState> {
 
   OrderBloc(this._repo) : super(const OrderInitial()) {
     on<PlaceOrderEvent>(_placeOrder);
+    on<VerifyAndPlaceOrderEvent>(_verifyAndPlaceOrder); // ← NEW
     on<LoadMyOrdersEvent>(_loadMyOrders);
     on<LoadOrderDetailEvent>(_loadOrderDetail);
     on<SilentRefreshOrderEvent>(_silentRefresh);
@@ -17,6 +21,7 @@ class OrderBloc extends Bloc<OrderEvent, OrderState> {
     on<ResetOrderEvent>((_, emit) => emit(const OrderInitial()));
   }
 
+  // ── Existing mock/direct order placement (kept for backward compat) ─────────
   Future<void> _placeOrder(PlaceOrderEvent e, Emitter<OrderState> emit) async {
     emit(const OrderLoading());
     try {
@@ -29,15 +34,10 @@ class OrderBloc extends Bloc<OrderEvent, OrderState> {
 
       String orderTypeStr;
       switch (e.orderType) {
-        case OrderType.dineIn:
-          orderTypeStr = 'DINE_IN';
-          break;
-        case OrderType.tableBooking:
-          orderTypeStr = 'TABLE_BOOKING';
-          break;
+        case OrderType.dineIn:       orderTypeStr = 'DINE_IN';       break;
+        case OrderType.tableBooking: orderTypeStr = 'TABLE_BOOKING'; break;
         case OrderType.takeAway:
-        default:
-          orderTypeStr = 'TAKEAWAY';
+        default:                     orderTypeStr = 'TAKEAWAY';
       }
 
       final order = await _repo.placeOrder(
@@ -61,6 +61,52 @@ class OrderBloc extends Bloc<OrderEvent, OrderState> {
       emit(OrderError(ex.message));
     } catch (_) {
       emit(const OrderError('Failed to place order. Please try again.'));
+    }
+  }
+
+  // ── NEW: Verify Razorpay payment + place order ────────────────────────────
+  Future<void> _verifyAndPlaceOrder(
+      VerifyAndPlaceOrderEvent e, Emitter<OrderState> emit) async {
+    emit(const OrderLoading());
+    try {
+      final items = e.cartItems.map((c) => {
+        'menuItemId': c.menuItemId,
+        'name':       c.name,
+        'quantity':   c.qty,
+        'price':      c.price,
+      }).toList();
+
+      String orderTypeStr;
+      switch (e.orderType) {
+        case OrderType.dineIn:       orderTypeStr = 'DINE_IN';       break;
+        case OrderType.tableBooking: orderTypeStr = 'TABLE_BOOKING'; break;
+        case OrderType.takeAway:
+        default:                     orderTypeStr = 'TAKEAWAY';
+      }
+
+      final order = await _repo.verifyAndPlaceOrder(
+        razorpayOrderId:   e.razorpayOrderId,
+        razorpayPaymentId: e.razorpayPaymentId,
+        razorpaySignature: e.razorpaySignature,
+        restaurantId:      e.restaurantId,
+        branchId:          e.branchId,
+        orderType:         orderTypeStr,
+        items:             items,
+        specialInstructions: e.specialInstructions,
+        scheduledTime:     e.scheduledTime,
+        guestCount:        e.guestCount,
+        couponCode:        e.couponCode,
+        pointsRedeemed:    e.pointsRedeemed,
+        subtotal:          e.subtotal,
+        commissionAmount:  e.commissionAmount,
+        bookingFee:        e.bookingFee,
+        totalAmount:       e.totalAmount,
+      );
+      emit(OrderPlaced(order));
+    } on ApiException catch (ex) {
+      emit(OrderError(ex.message));
+    } catch (_) {
+      emit(const OrderError('Payment verified but order failed. Contact support.'));
     }
   }
 
@@ -94,10 +140,7 @@ class OrderBloc extends Bloc<OrderEvent, OrderState> {
   Future<void> _cancelOrder(CancelOrderEvent e, Emitter<OrderState> emit) async {
     emit(const OrderLoading());
     try {
-      final order = await _repo.cancelOrder(
-        orderId: e.orderId,
-        reason:  e.reason,
-      );
+      final order = await _repo.cancelOrder(orderId: e.orderId, reason: e.reason);
       emit(OrderCancelled(order));
     } on ApiException catch (ex) {
       emit(OrderError(ex.message));

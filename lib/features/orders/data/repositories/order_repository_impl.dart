@@ -1,3 +1,6 @@
+// 📱 CUSTOMER APP
+// lib/features/orders/data/repositories/order_repository_impl.dart
+
 import '../../../../core/network/api_client.dart';
 import '../../../../core/storage/token_storage.dart';
 import '../../domain/entities/order.dart';
@@ -54,12 +57,76 @@ class OrderRepositoryImpl implements OrderRepository {
       if (tableId             != null) 'tableId':             tableId,
       if (specialInstructions != null) 'specialInstructions': specialInstructions,
       if (scheduledTime       != null) 'scheduledTime':       scheduledTime,
-      if (guestCount         != null) 'guestCount':          guestCount,
-      if (couponCode        != null) 'couponCode':          couponCode,
-      if (pointsRedeemed    != null && pointsRedeemed > 0) 'pointsRedeemed': pointsRedeemed,
+      if (guestCount          != null) 'guestCount':          guestCount,
+      if (couponCode          != null) 'couponCode':          couponCode,
+      if (pointsRedeemed      != null && pointsRedeemed > 0)
+        'pointsRedeemed': pointsRedeemed,
     };
 
     final data = await _api.post('/orders', body, restaurantId: restaurantId);
+    return OrderModel.fromJson(data['order'] as Map<String, dynamic>);
+  }
+
+  // ── Razorpay: verify payment signature + place order ─────────────────────
+  @override
+  Future<OrderEntity> verifyAndPlaceOrder({
+    required String razorpayOrderId,
+    required String razorpayPaymentId,
+    required String razorpaySignature,
+    required String restaurantId,
+    required String branchId,
+    required String orderType,
+    required List<Map<String, dynamic>> items,
+    String? specialInstructions,
+    String? scheduledTime,
+    int?    guestCount,
+    String? couponCode,
+    int?    pointsRedeemed,
+    double? subtotal,
+    double? commissionAmount,
+    double? bookingFee,
+    double? totalAmount,
+  }) async {
+    double sub = subtotal ?? 0;
+    if (sub == 0) {
+      for (final item in items) {
+        sub += ((item['price'] as num?)?.toDouble() ?? 0) *
+            ((item['quantity'] as num?)?.toInt() ?? 1);
+      }
+    }
+
+    final commission = commissionAmount ?? double.parse((sub * 2 / 100).toStringAsFixed(2));
+    final bFee       = bookingFee       ?? 0.0;
+    final total      = totalAmount      ?? double.parse((sub + commission + bFee).toStringAsFixed(2));
+
+    final body = <String, dynamic>{
+      // Razorpay verification fields
+      'razorpayOrderId':   razorpayOrderId,
+      'razorpayPaymentId': razorpayPaymentId,
+      'razorpaySignature': razorpaySignature,
+      // Order fields
+      'branchId':          branchId,
+      'orderType':         orderType,
+      'items':             items,
+      'subtotal':          sub,
+      'taxAmount':         0,
+      'taxPercent':        0,
+      'commissionAmount':  commission,
+      'bookingFee':        bFee,
+      'totalAmount':       total,
+      if (specialInstructions != null) 'specialInstructions': specialInstructions,
+      if (scheduledTime       != null) 'scheduledTime':       scheduledTime,
+      if (guestCount          != null) 'guestCount':          guestCount,
+      if (couponCode          != null) 'couponCode':          couponCode,
+      if (pointsRedeemed      != null && pointsRedeemed > 0)
+        'pointsRedeemed': pointsRedeemed,
+    };
+
+    final data = await _api.post(
+      '/payments/verify-and-place',
+      body,
+      restaurantId: restaurantId,
+    );
     return OrderModel.fromJson(data['order'] as Map<String, dynamic>);
   }
 
@@ -74,8 +141,7 @@ class OrderRepositoryImpl implements OrderRepository {
 
   @override
   Future<OrderEntity> getOrderById(String orderId) async {
-    final data = await _api.get('/orders/my/$orderId');
-    // Merge luckyTicket into the order JSON so OrderModel.fromJson can parse it
+    final data     = await _api.get('/orders/my/$orderId');
     final orderJson = Map<String, dynamic>.from(data['order'] as Map<String, dynamic>);
     if (data['luckyTicket'] != null) {
       orderJson['luckyTicket'] = data['luckyTicket'];

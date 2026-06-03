@@ -19,6 +19,26 @@ abstract class OrderRepository {
     double? totalAmount,
   });
 
+  // ── Razorpay: verify payment + place order ────────────────────────────────
+  Future<OrderEntity> verifyAndPlaceOrder({
+    required String razorpayOrderId,
+    required String razorpayPaymentId,
+    required String razorpaySignature,
+    required String restaurantId,
+    required String branchId,
+    required String orderType,
+    required List<Map<String, dynamic>> items,
+    String? specialInstructions,
+    String? scheduledTime,
+    int?    guestCount,
+    String? couponCode,
+    int?    pointsRedeemed,
+    double? subtotal,
+    double? commissionAmount,
+    double? bookingFee,
+    double? totalAmount,
+  });
+
   Future<List<OrderEntity>> getMyOrders({int page = 1});
 
   Future<OrderEntity> getOrderById(String orderId);

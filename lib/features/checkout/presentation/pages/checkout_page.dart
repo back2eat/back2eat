@@ -1,8 +1,13 @@
+// 📱 CUSTOMER APP
+// lib/features/checkout/presentation/pages/checkout_page.dart
+// pubspec.yaml: razorpay_flutter: ^1.3.7
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
 
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/di/injection.dart';
@@ -56,8 +61,8 @@ class _CheckoutView extends StatefulWidget {
 
 class _CheckoutViewState extends State<_CheckoutView> {
   String? _selectedTime;
-  int     _guestCount   = 1;
-  bool    _isSubmitting = false;
+  int     _guestCount    = 1;
+  bool    _isSubmitting  = false;
   late List<String> _timeSlots;
 
   final _couponCtrl    = TextEditingController();
@@ -73,6 +78,18 @@ class _CheckoutViewState extends State<_CheckoutView> {
   bool   _usePoints        = false;
   double _pointsDiscount   = 0.0;
 
+  // ── Razorpay ──────────────────────────────────────────────────────────────
+  late Razorpay _razorpay;
+
+  // Stored during payment so we can use in callbacks
+  CartState?  _pendingCart;
+  OrderType?  _pendingOrderType;
+  double?     _pendingSubtotal;
+  double?     _pendingCommission;
+  double?     _pendingTotal;
+  int?        _pendingGuestCount;
+  int         _pendingPointsToRedeem = 0;
+
   int    get _pointsToRedeem => _usePoints ? (_pointsDiscount / _pointsValuePerPt).round() : 0;
   double get _totalSavings   => _discountAmount + _pointsDiscount;
 
@@ -81,10 +98,22 @@ class _CheckoutViewState extends State<_CheckoutView> {
     super.initState();
     _timeSlots = _buildTimeSlots();
     _loadPoints();
+    _initRazorpay();
+  }
+
+  void _initRazorpay() {
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR,   _onPaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWallet);
   }
 
   @override
-  void dispose() { _couponCtrl.dispose(); super.dispose(); }
+  void dispose() {
+    _couponCtrl.dispose();
+    _razorpay.clear();
+    super.dispose();
+  }
 
   Future<void> _loadPoints() async {
     try {
@@ -125,7 +154,7 @@ class _CheckoutViewState extends State<_CheckoutView> {
       setState(() {
         _appliedCode    = code;
         _discountAmount = discount;
-        _couponSuccess  = desc.isNotEmpty ? desc : 'Coupon applied! You save Rs.${discount.toStringAsFixed(0)}';
+        _couponSuccess  = desc.isNotEmpty ? desc : 'Coupon applied! You save ₹${discount.toStringAsFixed(0)}';
         _couponError    = null;
       });
     } catch (e) {
@@ -139,45 +168,162 @@ class _CheckoutViewState extends State<_CheckoutView> {
   }
 
   void _removeCoupon() => setState(() {
-    _couponCtrl.clear(); _appliedCode = null; _discountAmount = 0.0; _couponError = null; _couponSuccess = null;
+    _couponCtrl.clear(); _appliedCode = null; _discountAmount = 0.0;
+    _couponError = null; _couponSuccess = null;
   });
 
-  void _placeOrder(BuildContext context, CartState cart, OrderType orderType,
-      double subtotal, double commission, double total, int? guestCount, int pointsToRedeem) {
+  // ── Step 1: Create Razorpay order on backend, open payment sheet ──────────
+  Future<void> _initiatePayment(
+      BuildContext context,
+      CartState cart,
+      OrderType orderType,
+      double subtotal,
+      double commission,
+      double total,
+      int? guestCount,
+      int pointsToRedeem,
+      ) async {
     if (_isSubmitting) return;
     setState(() => _isSubmitting = true);
-    context.read<OrderBloc>().add(PlaceOrderEvent(
-      restaurantId:     cart.items.first.restaurantId,
-      branchId:         cart.items.first.branchId,
-      orderType:        orderType,
-      cartItems:        cart.items,
-      scheduledTime:    _selectedTime,
-      guestCount:       guestCount,
-      couponCode:       _appliedCode,
-      pointsRedeemed:   pointsToRedeem > 0 ? pointsToRedeem : null,
-      subtotal:         subtotal,
-      commissionAmount: commission,
-      bookingFee:       0,
-      totalAmount:      total,
+
+    // Store for use in payment callbacks
+    _pendingCart           = cart;
+    _pendingOrderType      = orderType;
+    _pendingSubtotal       = subtotal;
+    _pendingCommission     = commission;
+    _pendingTotal          = total;
+    _pendingGuestCount     = guestCount;
+    _pendingPointsToRedeem = pointsToRedeem;
+
+    try {
+      // Create Razorpay order on backend
+      final res = await getIt<ApiClient>().post('/payments/create-order', {
+        'amount':  total,
+        'receipt': 'order_${DateTime.now().millisecondsSinceEpoch}',
+      });
+
+      final razorpayOrderId = res['razorpayOrderId'] as String;
+      final keyId           = res['keyId']           as String;
+      final amountInPaise   = res['amount']          as int;
+
+      // Open Razorpay payment sheet
+      final options = {
+        'key':         keyId,
+        'amount':      amountInPaise,
+        'order_id':    razorpayOrderId,
+        'name':        'Back2Eat',
+        'description': 'Food Order Payment',
+        'image':       'https://back2eat-api.onrender.com/assets/logo.png',
+        'prefill': {
+          'contact': '', // will auto-fill from Razorpay account
+          'email':   '',
+        },
+        'theme': {
+          'color': '#D01008',
+        },
+        'retry': {
+          'enabled': false,
+        },
+      };
+
+      _razorpay.open(options);
+    } catch (e) {
+      setState(() => _isSubmitting = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Payment failed: ${e.toString().replaceAll("Exception:", "").trim()}'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
+  }
+
+  // ── Step 2: Payment success → verify + place order ────────────────────────
+  void _onPaymentSuccess(PaymentSuccessResponse response) async {
+    if (!mounted) return;
+
+    final cart      = _pendingCart;
+    final orderType = _pendingOrderType;
+    if (cart == null || orderType == null) return;
+
+    String orderTypeStr;
+    switch (orderType) {
+      case OrderType.dineIn:       orderTypeStr = 'DINE_IN';   break;
+      case OrderType.tableBooking: orderTypeStr = 'TABLE_BOOKING'; break;
+      case OrderType.takeAway:
+      default:                     orderTypeStr = 'TAKEAWAY';
+    }
+
+    final items = cart.items.map((c) => {
+      'menuItemId': c.menuItemId,
+      'name':       c.name,
+      'quantity':   c.qty,
+      'price':      c.price,
+    }).toList();
+
+    // Dispatch verify + place order event
+    if (mounted) {
+      context.read<OrderBloc>().add(VerifyAndPlaceOrderEvent(
+        razorpayOrderId:   response.orderId   ?? '',
+        razorpayPaymentId: response.paymentId ?? '',
+        razorpaySignature: response.signature ?? '',
+        restaurantId:      cart.items.first.restaurantId,
+        branchId:          cart.items.first.branchId,
+        orderType:         orderType,
+        cartItems:         cart.items,
+        scheduledTime:     _selectedTime,
+        guestCount:        _pendingGuestCount,
+        couponCode:        _appliedCode,
+        pointsRedeemed:    _pendingPointsToRedeem > 0 ? _pendingPointsToRedeem : null,
+        subtotal:          _pendingSubtotal,
+        commissionAmount:  _pendingCommission,
+        bookingFee:        0,
+        totalAmount:       _pendingTotal,
+      ));
+    }
+  }
+
+  // ── Payment failed ────────────────────────────────────────────────────────
+  void _onPaymentError(PaymentFailureResponse response) {
+    setState(() => _isSubmitting = false);
+    if (!mounted) return;
+    final msg = response.message ?? 'Payment failed. Please try again.';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: AppColors.danger,
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
+  // ── External wallet selected ──────────────────────────────────────────────
+  void _onExternalWallet(ExternalWalletResponse response) {
+    setState(() => _isSubmitting = false);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('External wallet: ${response.walletName}'),
+      behavior: SnackBarBehavior.floating,
     ));
   }
 
   @override
   Widget build(BuildContext context) {
-    final currency = NumberFormat.currency(locale: 'en_IN', symbol: 'Rs.', decimalDigits: 2);
+    final currency = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 2);
 
     return BlocListener<OrderBloc, OrderState>(
       listener: (context, state) {
         if (state is OrderPlaced) {
-          if (mounted) setState(() => _isSubmitting = false);
+          setState(() => _isSubmitting = false);
           context.read<CartBloc>().add(const ClearCartEvent());
           context.go('/order-tracking', extra: state.order.id);
         }
         if (state is OrderError) {
-          if (mounted) setState(() => _isSubmitting = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(state.message), backgroundColor: AppColors.danger, behavior: SnackBarBehavior.floating),
-          );
+          setState(() => _isSubmitting = false);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(state.message),
+            backgroundColor: AppColors.danger,
+            behavior: SnackBarBehavior.floating,
+          ));
         }
       },
       child: Scaffold(
@@ -407,35 +553,16 @@ class _CheckoutViewState extends State<_CheckoutView> {
                                     ),
                                     SizedBox(width: 12.w),
                                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                      Text('$_pointsBalance pts  .  Rs.${(_pointsBalance * _pointsValuePerPt).toStringAsFixed(0)} value',
+                                      Text('$_pointsBalance pts  ·  ₹${(_pointsBalance * _pointsValuePerPt).toStringAsFixed(0)} value',
                                           style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w900)),
                                       Text(
-                                        _usePoints ? 'Saving Rs.${_pointsDiscount.toStringAsFixed(0)} on this order' : 'Tap to apply points',
+                                        _usePoints ? 'Saving ₹${_pointsDiscount.toStringAsFixed(0)} on this order' : 'Tap to apply points',
                                         style: TextStyle(fontSize: 11.sp, fontWeight: FontWeight.w700,
                                             color: _usePoints ? AppColors.success : AppColors.muted),
                                       ),
                                     ])),
                                     Switch(value: _usePoints, activeColor: AppColors.primary, onChanged: (_) => _togglePoints(subtotal)),
                                   ]),
-                                  if (_luckyWinBalance > 0) ...[
-                                    SizedBox(height: 8.h),
-                                    Container(
-                                      padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 6.h),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFFFF8E1),
-                                        borderRadius: BorderRadius.circular(8.r),
-                                        border: Border.all(color: const Color(0xFFFFD54F)),
-                                      ),
-                                      child: Row(children: [
-                                        const Text('🎉', style: TextStyle(fontSize: 13)),
-                                        SizedBox(width: 6.w),
-                                        Expanded(child: Text(
-                                          'Lucky draw win: $_luckyWinBalance pts (Rs.${(_luckyWinBalance * _pointsValuePerPt).toStringAsFixed(0)}) - fully redeemable!',
-                                          style: TextStyle(fontSize: 11.sp, fontWeight: FontWeight.w700, color: const Color(0xFF7C5C00)),
-                                        )),
-                                      ]),
-                                    ),
-                                  ],
                                 ])),
                               ],
 
@@ -527,7 +654,7 @@ class _CheckoutViewState extends State<_CheckoutView> {
                           ),
                         ),
 
-                        // STICKY CTA
+                        // ── Sticky bottom CTA ──────────────────────────────
                         Container(
                           padding: EdgeInsets.fromLTRB(16.w, 12.h, 16.w, 14.h),
                           decoration: BoxDecoration(
@@ -539,7 +666,7 @@ class _CheckoutViewState extends State<_CheckoutView> {
                               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                 Text('Payable', style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.w800, color: AppColors.muted)),
                                 if (_totalSavings > 0)
-                                  Text('You saved Rs.${_totalSavings.toStringAsFixed(0)}!',
+                                  Text('You saved ₹${_totalSavings.toStringAsFixed(0)}!',
                                       style: TextStyle(fontSize: 10.sp, fontWeight: FontWeight.w800, color: AppColors.success)),
                               ]),
                               const Spacer(),
@@ -554,11 +681,15 @@ class _CheckoutViewState extends State<_CheckoutView> {
                             Opacity(
                               opacity: (isEmpty || isLoading || needsTimeSlot) ? 0.6 : 1,
                               child: PrimaryButton(
-                                text: isLoading ? 'Placing...' : isEmpty ? 'Cart Empty' : 'Place Order',
+                                text: isLoading ? 'Processing...' : isEmpty ? 'Cart Empty' : 'Pay ₹${total.toStringAsFixed(0)}',
                                 onTap: () {
                                   if (isEmpty || isLoading || needsTimeSlot || _isSubmitting) return;
-                                  _placeOrder(context, cart, effectiveType, subtotal, commission,
-                                      total, needsGuests ? _guestCount : null, _pointsToRedeem);
+                                  _initiatePayment(
+                                    context, cart, effectiveType,
+                                    subtotal, commission, total,
+                                    needsGuests ? _guestCount : null,
+                                    _pointsToRedeem,
+                                  );
                                 },
                               ),
                             ),
@@ -637,6 +768,7 @@ class _CheckoutViewState extends State<_CheckoutView> {
   }
 }
 
+// ── Supporting widgets (unchanged) ────────────────────────────────────────────
 class _BillRow extends StatelessWidget {
   final String label; final double value; final NumberFormat currency; final Color? labelColor;
   const _BillRow({required this.label, required this.value, required this.currency, this.labelColor});

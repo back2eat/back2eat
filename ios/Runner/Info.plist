@@ -73,5 +73,15 @@
 
 <key>ITSAppUsesNonExemptEncryption</key>
 <false/>
+<key>LSApplicationQueriesSchemes</key>
+<array>
+    <string>upi</string>
+    <string>phonepe</string>
+    <string>paytmmp</string>
+    <string>bhim</string>
+    <string>gpay</string>
+    <string>credpay</string>
+    <string>rzp</string>
+</array>
 </dict>
 </plist>
