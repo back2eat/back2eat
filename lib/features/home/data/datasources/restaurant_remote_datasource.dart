@@ -94,14 +94,15 @@ class RestaurantRemoteDatasource {
         final menuData   = await _api.get('/menu/public?branchId=$branchId');
         final categories = menuData['menu'] as List<dynamic>? ?? [];
         for (final cat in categories) {
-          final items =
-              (cat as Map<String, dynamic>)['items'] as List<dynamic>? ?? [];
+          final catMap       = cat as Map<String, dynamic>;
+          final categoryName = catMap['name'] as String? ?? ''; // ← extract category name
+          final items        = catMap['items'] as List<dynamic>? ?? [];
           for (final item in items) {
-            menuItems.add(MenuItemModel.fromJson(
-                item as Map<String, dynamic>, restaurantId));
+            final itemJson = Map<String, dynamic>.from(item as Map<String, dynamic>);
+            itemJson['categoryName'] = categoryName; // ← inject into item
+            menuItems.add(MenuItemModel.fromJson(itemJson, restaurantId));
           }
-        }
-      } catch (_) {}
+        }      } catch (_) {}
     }
 
     return (restaurant as Restaurant, branchId, menuItems);
