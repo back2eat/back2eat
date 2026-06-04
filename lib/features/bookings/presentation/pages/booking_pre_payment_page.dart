@@ -1,16 +1,19 @@
+// 📱 CUSTOMER APP
+// lib/features/bookings/presentation/pages/booking_pre_payment_page.dart
+// Replaces mock payment with real Razorpay SDK
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:go_router/go_router.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
 
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../bookings/domain/entities/booking.dart';
-import '../../../bookings/presentation/bloc/booking_bloc.dart';
+import '../bloc/booking_bloc.dart';
 
-/// IMPORTANT: BookingBloc must be provided by app_router.
-/// Do NOT wrap this page in another BlocProvider.
 class BookingPrePaymentPage extends StatefulWidget {
   final String restaurantId;
   final String branchId;
@@ -26,23 +29,30 @@ class BookingPrePaymentPage extends StatefulWidget {
 }
 
 class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
-  int     _guestCount     = 1;
+  int     _guestCount  = 1;
   String? _selectedTime;
-  String  _selectedMethod = 'UPI';
-  bool    _paying         = false;
+  bool    _paying      = false;
   String? _error;
   late List<String> _timeSlots;
 
-  static const _methods = [
-    ('UPI',         Icons.account_balance_wallet_outlined, 'Pay via UPI'),
-    ('CARD',        Icons.credit_card_outlined,            'Credit / Debit Card'),
-    ('NET_BANKING', Icons.account_balance_outlined,        'Net Banking'),
-  ];
+  // Razorpay
+  late Razorpay _razorpay;
+  String? _pendingOrderId; // booking fee order ID
 
   @override
   void initState() {
     super.initState();
     _timeSlots = _buildTimeSlots();
+    _razorpay  = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR,   _onPaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWallet);
+  }
+
+  @override
+  void dispose() {
+    _razorpay.clear();
+    super.dispose();
   }
 
   List<String> _buildTimeSlots() {
@@ -63,78 +73,87 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
     return slots;
   }
 
+  // ── Step 1: Create booking → get orderId → open Razorpay ─────────────────
   Future<void> _payAndBook() async {
     if (_selectedTime == null) {
       setState(() => _error = 'Please select a time slot');
       return;
     }
+    if (_paying) return;
     setState(() { _paying = true; _error = null; });
 
-    try {
-      // Mock payment delay — replace with Razorpay SDK when going live
-      await Future.delayed(const Duration(milliseconds: 1500));
-      if (!mounted) return;
-
-      // Fire booking creation — BlocListener handles response
-      context.read<BookingBloc>().add(CreateBookingEvent(
-        restaurantId:    widget.restaurantId,
-        branchId:        widget.branchId,
-        guestCount:      _guestCount,
-        bookingDate:     DateTime.now(),
-        timeSlot:        _selectedTime!,
-        specialRequests: null,
-      ));
-    } catch (e) {
-      if (mounted) setState(() { _error = e.toString().replaceAll('Exception: ', ''); _paying = false; });
-    }
+    // Fire booking creation — wait for BookingCreated state
+    context.read<BookingBloc>().add(CreateBookingEvent(
+      restaurantId:    widget.restaurantId,
+      branchId:        widget.branchId,
+      guestCount:      _guestCount,
+      bookingDate:     DateTime.now(),
+      timeSlot:        _selectedTime!,
+      specialRequests: null,
+    ));
+    // Razorpay will open in BlocListener when BookingCreated fires
   }
 
-  // Verify the ₹19 payment immediately after booking is created
-  // This marks the linked order's paymentStatus as PAID
-  // so bookings page shows "Place Food Order" not "Pay ₹19 again"
-  Future<void> _verifyBookingPayment(BookingEntity booking) async {
+  // ── Step 2: Booking created → open Razorpay for ₹19 ─────────────────────
+  Future<void> _openRazorpayForBooking(BookingEntity booking) async {
     final orderId = booking.orderId;
-    if (orderId == null || orderId.isEmpty) return;
+    if (orderId == null || orderId.isEmpty) {
+      setState(() { _paying = false; _error = 'Booking created but no order found'; });
+      return;
+    }
+    _pendingOrderId = orderId;
+
     try {
-      // Step 1: Create Razorpay order
-      final orderRes = await getIt<ApiClient>().post(
+      final payRes = await getIt<ApiClient>().post(
         '/payments/create-order',
         {'orderId': orderId},
       );
-      final razorpayOrderId = orderRes['razorpayOrderId'] as String? ?? '';
-      if (razorpayOrderId.isEmpty) return;
 
-      // Step 2: Verify with mock IDs
-      await getIt<ApiClient>().post('/payments/verify', {
-        'razorpayOrderId':   razorpayOrderId,
-        'razorpayPaymentId': 'pay_mock_${DateTime.now().millisecondsSinceEpoch}',
-        'razorpaySignature': 'mock_sig',
-        'orderId':           orderId,
+      final razorpayOrderId = payRes['razorpayOrderId'] as String;
+      final amountInPaise   = payRes['amount']          as int;
+      final keyId           = payRes['keyId']           as String;
+
+      _razorpay.open({
+        'key':         keyId,
+        'amount':      amountInPaise,
+        'order_id':    razorpayOrderId,
+        'name':        'Back2Eat',
+        'description': 'Table Booking Fee',
+        'theme':       {'color': '#D01008'},
+        'retry':       {'enabled': false},
       });
-      debugPrint('[Booking] ₹19 payment verified for order: $orderId');
     } catch (e) {
-      // Non-fatal — booking still exists, just paymentStatus stays PENDING
-      debugPrint('[Booking] Payment verify error (non-fatal): $e');
+      setState(() {
+        _paying = false;
+        _error  = e.toString().replaceAll('Exception: ', '');
+      });
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return BlocListener<BookingBloc, BookingState>(
-      listener: (context, state) async {
-        if (state is BookingCreated) {
-          // Verify payment so paymentStatus → PAID
-          await _verifyBookingPayment(state.booking);
-          if (!mounted) return;
-          setState(() => _paying = false);
-          _showSuccess();
-        }
-        if (state is BookingError) {
-          setState(() { _error = state.message; _paying = false; });
-        }
-      },
-      child: _buildUI(),
-    );
+  // ── Step 3: Payment success → verify ─────────────────────────────────────
+  void _onPaymentSuccess(PaymentSuccessResponse response) async {
+    if (!mounted || _pendingOrderId == null) return;
+    try {
+      await getIt<ApiClient>().post('/payments/verify', {
+        'orderId':           _pendingOrderId!,
+        'razorpayOrderId':   response.orderId   ?? '',
+        'razorpayPaymentId': response.paymentId ?? '',
+        'razorpaySignature': response.signature ?? '',
+      });
+
+      setState(() => _paying = false);
+      if (mounted) _showSuccess();
+    } catch (e) {
+      setState(() { _paying = false; _error = 'Payment done but verification failed. Contact support.'; });
+    }
+  }
+
+  void _onPaymentError(PaymentFailureResponse response) {
+    setState(() { _paying = false; _error = response.message ?? 'Payment failed. Please try again.'; });
+  }
+
+  void _onExternalWallet(ExternalWalletResponse response) {
+    setState(() => _paying = false);
   }
 
   void _showSuccess() {
@@ -148,6 +167,22 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
         Navigator.pop(context);
         context.go('/bookings');
       }),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocListener<BookingBloc, BookingState>(
+      listener: (context, state) {
+        if (state is BookingCreated) {
+          // Booking created — now open Razorpay for ₹19 payment
+          _openRazorpayForBooking(state.booking);
+        }
+        if (state is BookingError) {
+          setState(() { _error = state.message; _paying = false; });
+        }
+      },
+      child: _buildUI(),
     );
   }
 
@@ -190,13 +225,12 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
                 Text('₹19.00',
                     style: TextStyle(fontSize: 36.sp, color: Colors.white, fontWeight: FontWeight.w900)),
                 SizedBox(height: 4.h),
-                Text('Refundable if restaurant cancels · Non-refundable if you cancel',
+                Text('Refundable if restaurant cancels',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 10.sp,
                         color: Colors.white.withOpacity(0.75), fontWeight: FontWeight.w600)),
               ]),
             ),
-
             SizedBox(height: 20.h),
 
             // ── Time Slot ─────────────────────────────────────────────────
@@ -254,7 +288,6 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
                 ],
               ]),
             ),
-
             SizedBox(height: 16.h),
 
             // ── Guest Count ───────────────────────────────────────────────
@@ -297,37 +330,7 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
                 ),
               ]),
             ),
-
             SizedBox(height: 20.h),
-
-            // ── Payment Method ────────────────────────────────────────────
-            Text('Payment Method',
-                style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w900)),
-            SizedBox(height: 10.h),
-
-            ...(_methods.map((m) {
-              final selected = _selectedMethod == m.$1;
-              return GestureDetector(
-                onTap: () => setState(() => _selectedMethod = m.$1),
-                child: Container(
-                  margin: EdgeInsets.only(bottom: 10.h),
-                  padding: EdgeInsets.all(14.w),
-                  decoration: BoxDecoration(
-                    color: Colors.white, borderRadius: BorderRadius.circular(14.r),
-                    border: Border.all(
-                      color: selected ? AppColors.primary : Colors.black.withOpacity(0.06),
-                      width: selected ? 1.5 : 1,
-                    ),
-                  ),
-                  child: Row(children: [
-                    Icon(m.$2, color: selected ? AppColors.primary : AppColors.muted, size: 22.sp),
-                    SizedBox(width: 12.w),
-                    Expanded(child: Text(m.$3, style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w700))),
-                    if (selected) Icon(Icons.check_circle_rounded, color: AppColors.primary, size: 20.sp),
-                  ]),
-                ),
-              );
-            })),
 
             // ── Error ─────────────────────────────────────────────────────
             if (_error != null) ...[
@@ -352,14 +355,13 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
                 Icon(Icons.info_outline_rounded, color: AppColors.info, size: 16.sp),
                 SizedBox(width: 8.w),
                 Expanded(child: Text(
-                  "After paying, your table request is sent to the restaurant. "
-                      "Once confirmed, tap 'Place Food Order' to order your food.",
+                  "After paying ₹19, your table request is sent to the restaurant. "
+                      "Once confirmed, you'll pay for your food order separately.",
                   style: TextStyle(fontSize: 11.5.sp, color: AppColors.info,
                       fontWeight: FontWeight.w600, height: 1.4),
                 )),
               ]),
             ),
-
             SizedBox(height: 28.h),
 
             // ── Pay Button ────────────────────────────────────────────────
@@ -368,8 +370,7 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
               child: ElevatedButton(
                 onPressed: (_paying || needsTimeSlot) ? null : _payAndBook,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
+                  backgroundColor: AppColors.primary, foregroundColor: Colors.white,
                   elevation: 0,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
                   disabledBackgroundColor: AppColors.primary.withOpacity(0.5),
@@ -381,17 +382,18 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
                   SizedBox(width: 12.w),
                   Text('Processing...', style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.w900)),
                 ])
-                    : Text(needsTimeSlot ? 'Select a time slot first' : 'Pay ₹19 & Request Table',
-                    style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.w900)),
+                    : Text(
+                  needsTimeSlot ? 'Select a time slot first' : 'Pay ₹19 & Request Table',
+                  style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.w900),
+                ),
               ),
             ),
-
             SizedBox(height: 12.h),
             Center(
               child: TextButton(
                 onPressed: _paying ? null : () => context.pop(),
-                child: Text('Cancel',
-                    style: TextStyle(fontSize: 13.sp, color: AppColors.muted, fontWeight: FontWeight.w700)),
+                child: Text('Cancel', style: TextStyle(
+                    fontSize: 13.sp, color: AppColors.muted, fontWeight: FontWeight.w700)),
               ),
             ),
           ]),
@@ -425,8 +427,8 @@ class _SuccessSheet extends StatelessWidget {
             textAlign: TextAlign.center),
         SizedBox(height: 10.h),
         Text(
-          "Your ₹19 is confirmed. Once the restaurant confirms your table, "
-              "tap 'Place Food Order' to order your food.",
+          "₹19 paid. Once the restaurant confirms your table, "
+              "you can place your food order from My Bookings.",
           style: TextStyle(fontSize: 13.sp, color: AppColors.muted,
               fontWeight: FontWeight.w600, height: 1.5),
           textAlign: TextAlign.center,
@@ -438,11 +440,9 @@ class _SuccessSheet extends StatelessWidget {
             onPressed: onDone,
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary, foregroundColor: Colors.white,
-              elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14.r)),
+              elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14.r)),
             ),
-            child: Text('View My Bookings',
-                style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.w900)),
+            child: Text('View My Bookings', style: TextStyle(fontSize: 15.sp, fontWeight: FontWeight.w900)),
           ),
         ),
       ]),
