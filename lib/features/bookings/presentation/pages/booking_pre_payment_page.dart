@@ -171,10 +171,11 @@ class _BookingPrePaymentPageState extends State<BookingPrePaymentPage> {
       enableDrag: false,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => _SuccessSheet(onDone: () {
-        Navigator.pop(context);
-        context.go('/bookings');
-      }),
+        builder: (_) => _SuccessSheet(onDone: () {
+     Navigator.pop(context); // close the bottom sheet
+     // push instead of go — preserves back stack
+     context.push('/bookings');
+   }),
     );
   }
 
