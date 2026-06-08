@@ -57,8 +57,8 @@ class OrderBloc extends Bloc<OrderEvent, OrderState> {
       emit(OrderPlaced(order));
     } on ApiException catch (ex) {
       emit(OrderError(ex.message));
-    } catch (_) {
-      emit(const OrderError('Failed to place order. Please try again.'));
+    } catch (e) {
+      emit(OrderError(e.toString().replaceAll('Exception:', '').trim()));
     }
   }
 
@@ -67,7 +67,7 @@ class OrderBloc extends Bloc<OrderEvent, OrderState> {
     try {
       final orders = await _repo.getMyOrders();
       emit(OrdersLoaded(orders));
-    } catch (_) {
+    } catch (e) {
       emit(const OrderError('Could not load orders.'));
     }
   }
@@ -77,8 +77,11 @@ class OrderBloc extends Bloc<OrderEvent, OrderState> {
     try {
       final order = await _repo.getOrderById(e.orderId);
       emit(OrderDetailLoaded(order));
-    } catch (_) {
-      emit(const OrderError('Could not load order details.'));
+    } on ApiException catch (ex) {
+      emit(OrderError(ex.message));
+    } catch (e) {
+      // Surface the real error so we can see what's failing
+      emit(OrderError(e.toString().replaceAll('Exception:', '').trim()));
     }
   }
 
@@ -86,7 +89,9 @@ class OrderBloc extends Bloc<OrderEvent, OrderState> {
     try {
       final order = await _repo.getOrderById(e.orderId);
       emit(OrderDetailLoaded(order));
-    } catch (_) {}
+    } catch (_) {
+      // Truly silent — don't disrupt the UI on background refresh failures
+    }
   }
 
   Future<void> _cancelOrder(CancelOrderEvent e, Emitter<OrderState> emit) async {

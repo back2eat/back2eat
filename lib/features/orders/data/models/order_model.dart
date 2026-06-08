@@ -32,76 +32,88 @@ class OrderModel extends OrderEntity {
   });
 
   factory OrderModel.fromJson(Map<String, dynamic> json) {
-    // ── Items ──────────────────────────────────────────────────────────────
+    // ── Items — every field null-safe, no hard casts ───────────────────────
     final rawItems = json['items'] as List<dynamic>? ?? [];
     final items = rawItems.map((e) {
-      final m = e as Map<String, dynamic>;
+      final m = (e is Map) ? Map<String, dynamic>.from(e) : <String, dynamic>{};
+      // menuItemId may be an ObjectId string or a nested populated object
+      final mid = m['menuItemId'];
+      final menuItemId = mid is Map
+          ? (mid['_id']?.toString() ?? '')
+          : (mid?.toString() ?? m['_id']?.toString() ?? '');
       return OrderItem(
-        menuItemId: m['menuItemId'] as String? ?? m['_id'] as String? ?? '',
-        name:       m['name']       as String? ?? '',
-        quantity:   (m['quantity']  as num?)?.toInt()    ?? 1,
-        price:      (m['price']     as num?)?.toDouble() ?? 0.0,
+        menuItemId: menuItemId,
+        name:       m['name']?.toString()                       ?? '',
+        quantity:   (m['quantity'] as num?)?.toInt()            ?? 1,
+        price:      (m['price']    as num?)?.toDouble()         ?? 0.0,
       );
     }).toList();
 
-    // ── Restaurant — may be populated object or raw string ID ──────────────
-    final restaurant     = json['restaurantId'];
-    final restaurantId   = restaurant is Map
-        ? (restaurant['_id']  as String? ?? '')
-        : (restaurant          as String? ?? '');
+    // ── Restaurant — may be populated object or raw string ─────────────────
+    final restaurant = json['restaurantId'];
+    final restaurantId = restaurant is Map
+        ? (restaurant['_id']?.toString()  ?? '')
+        : (restaurant?.toString()         ?? '');
     final restaurantName = restaurant is Map
-        ? (restaurant['name'] as String? ?? '')
-        : (json['restaurantName'] as String? ?? '');
+        ? (restaurant['name']?.toString() ?? '')
+        : (json['restaurantName']?.toString() ?? '');
 
-    // ── Branch — may be populated object or raw string ID ─────────────────
+    // ── Branch — may be populated object or raw string ─────────────────────
     final branch        = json['branchId'];
-    final branchName    = branch is Map ? branch['name']      as String? : null;
-    final branchAddress = branch is Map ? branch['address']   as String? : null;
-    final branchPhone   = branch is Map ? branch['phone']     as String? : null;
+    final branchName    = branch is Map ? branch['name']?.toString()    : null;
+    final branchAddress = branch is Map ? branch['address']?.toString() : null;
+    final branchPhone   = branch is Map ? branch['phone']?.toString()   : null;
     final branchLat     = branch is Map ? (branch['latitude']  as num?)?.toDouble() : null;
     final branchLng     = branch is Map ? (branch['longitude'] as num?)?.toDouble() : null;
 
     // ── Status — safe fallback ─────────────────────────────────────────────
-    // paymentStatus FOOD_PAID means order is active (CREATED/ACCEPTED)
-    // Use paymentStatus to derive a display status for TABLE_BOOKING orders
-    final rawStatus      = json['status']        as String? ?? 'CREATED';
-    final paymentStatus  = json['paymentStatus'] as String? ?? '';
-    final orderType      = json['orderType']     as String? ?? 'TAKEAWAY';
+    final rawStatus     = json['status']?.toString()        ?? 'CREATED';
+    final paymentStatus = json['paymentStatus']?.toString() ?? '';
+    final orderType     = json['orderType']?.toString()     ?? 'TAKEAWAY';
 
-    // For TABLE_BOOKING with FOOD_PAID, treat as CREATED so tracking shows correctly
-    final status = (orderType == 'TABLE_BOOKING' && paymentStatus == 'FOOD_PAID' && rawStatus == 'CREATED')
+    // TABLE_BOOKING with FOOD_PAID → order is live, treat as CREATED so
+    // tracking page shows the live progress stepper
+    final status = (orderType == 'TABLE_BOOKING' &&
+        paymentStatus == 'FOOD_PAID' &&
+        rawStatus == 'CREATED')
         ? 'CREATED'
         : rawStatus;
+
+    // ── tableId — may be populated object ─────────────────────────────────
+    final tableRaw = json['tableId'];
+    final tableId  = tableRaw is Map
+        ? tableRaw['_id']?.toString()
+        : tableRaw?.toString();
 
     // ── Lucky ticket ───────────────────────────────────────────────────────
     final lucky = json['luckyTicket'] as Map?;
 
     return OrderModel(
-      id:                  json['_id']          as String? ?? '',
-      orderNumber:         json['orderNumber']  as String? ?? '',
-      restaurantId:        restaurantId,
-      restaurantName:      restaurantName,
-      status:              status,
-      orderType:           orderType,
-      totalAmount:         (json['totalAmount'] as num?)?.toDouble() ?? 0.0,
-      items:               items,
-      createdAt:           DateTime.tryParse(json['createdAt'] as String? ?? '')
+      id:           json['_id']?.toString()         ?? '',
+      orderNumber:  json['orderNumber']?.toString() ?? '',
+      restaurantId:  restaurantId,
+      restaurantName: restaurantName,
+      status:        status,
+      orderType:     orderType,
+      totalAmount:   (json['totalAmount'] as num?)?.toDouble() ?? 0.0,
+      items:         items,
+      createdAt:     DateTime.tryParse(json['createdAt']?.toString() ?? '')
           ?? DateTime.now(),
-      tableId:             json['tableId']              as String?,
-      specialInstructions: json['specialInstructions']  as String?,
+      tableId:             tableId,
+      specialInstructions: json['specialInstructions']?.toString(),
       branchLatitude:      branchLat,
       branchLongitude:     branchLng,
       branchAddress:       branchAddress,
       branchName:          branchName,
       branchPhone:         branchPhone,
-      scheduledTime:       json['scheduledTime']  as String?,
-      guestCount:          (json['guestCount']    as num?)?.toInt(),
-      couponCode:          json['couponCode']     as String?,
-      discountAmount:      (json['discount']      as num?)?.toDouble(),
-      luckyTicketNumber:   lucky?['ticketNumber'] as String?,
-      luckyDrawTitle:      lucky?['drawTitle']    as String?,
-      luckyPrize:          lucky?['prize']        as String?,
-      luckyIsWinner:       (lucky?['isWinner']    as bool?) ?? false,
+      scheduledTime:       json['scheduledTime']?.toString(),
+      guestCount:          (json['guestCount'] as num?)?.toInt(),
+      couponCode:          json['couponCode']?.toString(),
+      discountAmount:      (json['discount']   as num?)?.toDouble(),
+      luckyTicketNumber:   lucky?['ticketNumber']?.toString(),
+      luckyDrawTitle:      lucky?['drawTitle']?.toString(),
+      luckyPrize:          lucky?['prize']?.toString(),
+      luckyIsWinner:       (lucky?['isWinner'] as bool?) ?? false,
     );
   }
 }
