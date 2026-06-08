@@ -6,6 +6,6 @@ class GetRestaurantDetail {
   final RestaurantRepository _repo;
   GetRestaurantDetail(this._repo);
 
-  Future<(Restaurant, String?, List<MenuItem>)> call(String restaurantId) =>
+  Future<(Restaurant, String?, List<MenuItem>, bool, String?, String?)> call(String restaurantId) =>
       _repo.getRestaurantDetail(restaurantId);
 }

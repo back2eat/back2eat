@@ -1,6 +1,7 @@
 // 📱 CUSTOMER APP
 // lib/features/home/data/repositories/restaurant_repository_impl.dart
 
+import '../../domain/entities/branch.dart';
 import '../../domain/entities/menu_item.dart';
 import '../../domain/entities/restaurant.dart';
 import '../../domain/repositories/restaurant_repository.dart';
@@ -15,8 +16,8 @@ class RestaurantRepositoryImpl implements RestaurantRepository {
       ds.getRestaurants(search: search, city: city);
 
   @override
-  Future<(Restaurant, String?, List<MenuItem>)> getRestaurantDetail(
-      String restaurantId, {String? selectedBranchId}) =>
+  Future<(Restaurant, String?, List<MenuItem>, bool, String?, String?)>
+  getRestaurantDetail(String restaurantId, {String? selectedBranchId}) =>
       ds.getRestaurantDetail(restaurantId, selectedBranchId: selectedBranchId);
 
   @override
@@ -25,4 +26,8 @@ class RestaurantRepositoryImpl implements RestaurantRepository {
   @override
   Future<List<Restaurant>> getFeaturedRestaurants() =>
       ds.getFeaturedRestaurants();
+
+  @override
+  Future<List<BranchEntity>> getPublicBranches(String restaurantId) =>
+      ds.getPublicBranches(restaurantId);
 }

@@ -19,11 +19,10 @@ class RestaurantBloc extends Bloc<RestaurantEvent, RestaurantState> {
     emit(const RestaurantLoading());
     try {
       final results = await Future.wait([
-        repo.getRestaurants(search: event.search, city: event.city), // ← pass city
+        repo.getRestaurants(search: event.search, city: event.city),
         repo.getCategories(),
         repo.getFeaturedRestaurants(),
       ]);
-
       emit(RestaurantLoaded(
         (results[0] as List).cast(),
         categories:          (results[1] as List).cast(),
@@ -38,14 +37,18 @@ class RestaurantBloc extends Bloc<RestaurantEvent, RestaurantState> {
       LoadRestaurantDetailEvent event, Emitter<RestaurantState> emit) async {
     emit(const RestaurantLoading());
     try {
-      final (restaurant, branchId, menu) = await repo.getRestaurantDetail(
+      final (restaurant, branchId, menu, branchIsOpen, branchOpenTime, branchCloseTime) =
+      await repo.getRestaurantDetail(
         event.restaurantId,
         selectedBranchId: event.selectedBranchId,
       );
       emit(RestaurantDetailLoaded(
-        restaurant: restaurant,
-        branchId:   branchId,
-        menuItems:  menu,
+        restaurant:      restaurant,
+        branchId:        branchId,
+        menuItems:       menu,
+        branchIsOpen:    branchIsOpen,
+        branchOpenTime:  branchOpenTime,
+        branchCloseTime: branchCloseTime,
       ));
     } catch (e) {
       emit(RestaurantError(e.toString()));

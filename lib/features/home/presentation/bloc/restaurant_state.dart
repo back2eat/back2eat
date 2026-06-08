@@ -1,3 +1,6 @@
+// 📱 CUSTOMER APP
+// lib/features/home/presentation/bloc/restaurant_state.dart
+
 import 'package:equatable/equatable.dart';
 import '../../domain/entities/menu_item.dart';
 import '../../domain/entities/restaurant.dart';
@@ -20,9 +23,9 @@ class RestaurantError extends RestaurantState {
 }
 
 class RestaurantLoaded extends RestaurantState {
-  final List<Restaurant>       restaurants;
-  final List<Restaurant>       featuredRestaurants;
-  final List<(String, int)>    categories;
+  final List<Restaurant>    restaurants;
+  final List<Restaurant>    featuredRestaurants;
+  final List<(String, int)> categories;
 
   const RestaurantLoaded(
       this.restaurants, {
@@ -35,16 +38,27 @@ class RestaurantLoaded extends RestaurantState {
 }
 
 class RestaurantDetailLoaded extends RestaurantState {
-  final Restaurant    restaurant;
-  final String?       branchId;
+  final Restaurant     restaurant;
+  final String?        branchId;
   final List<MenuItem> menuItems;
+
+  // Branch-level open/closed — independent per outlet
+  final bool    branchIsOpen;
+  final String? branchOpenTime;   // "09:00" 24hr
+  final String? branchCloseTime;  // "22:00" 24hr
 
   const RestaurantDetailLoaded({
     required this.restaurant,
     required this.menuItems,
     this.branchId,
+    this.branchIsOpen    = true,
+    this.branchOpenTime,
+    this.branchCloseTime,
   });
 
   @override
-  List<Object?> get props => [restaurant, branchId, menuItems];
+  List<Object?> get props => [
+    restaurant, branchId, menuItems,
+    branchIsOpen, branchOpenTime, branchCloseTime,
+  ];
 }
