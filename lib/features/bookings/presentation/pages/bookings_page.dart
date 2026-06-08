@@ -82,22 +82,18 @@ class _BookingsPageState extends State<BookingsPage> {
 
       if (!mounted) return;
 
-      // Show success
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Payment successful! Your food order is being prepared.'),
         backgroundColor: AppColors.success,
         behavior: SnackBarBehavior.floating,
       ));
 
-      // Reload bookings to reflect FOOD_PAID status
       context.read<BookingBloc>().add(const LoadMyBookingsEvent());
 
-      // Navigate to order tracking after short delay so snackbar shows
       final orderId = _pendingFoodOrderId!;
       Future.delayed(const Duration(milliseconds: 500), () {
         if (mounted) context.push('/order-tracking', extra: orderId);
       });
-
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -132,6 +128,7 @@ class _BookingsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final canPop = context.canPop();
     return Scaffold(
       backgroundColor: const Color(0xFFF7F7F7),
       appBar: AppBar(
@@ -140,10 +137,18 @@ class _BookingsView extends StatelessWidget {
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.white,
         elevation: 0,
+        // Show back button only when there's somewhere to go back to
+        leading: canPop
+            ? IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded),
+          onPressed: () => context.pop(),
+        )
+            : null,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
-            onPressed: () => context.read<BookingBloc>().add(const LoadMyBookingsEvent()),
+            onPressed: () =>
+                context.read<BookingBloc>().add(const LoadMyBookingsEvent()),
           ),
         ],
       ),
@@ -152,32 +157,38 @@ class _BookingsView extends StatelessWidget {
           if (state is BookingCancelled) {
             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
               content: Text('Booking cancelled. Refund will be processed in 5-7 days.'),
-              backgroundColor: AppColors.success, behavior: SnackBarBehavior.floating,
+              backgroundColor: AppColors.success,
+              behavior: SnackBarBehavior.floating,
             ));
             context.read<BookingBloc>().add(const LoadMyBookingsEvent());
           }
           if (state is BookingError) {
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
               content: Text(state.message),
-              backgroundColor: AppColors.danger, behavior: SnackBarBehavior.floating,
+              backgroundColor: AppColors.danger,
+              behavior: SnackBarBehavior.floating,
             ));
           }
         },
         builder: (context, state) {
-          if (state is BookingLoading) return const Center(child: CircularProgressIndicator());
+          if (state is BookingLoading) {
+            return const Center(child: CircularProgressIndicator());
+          }
 
           if (state is BookingsLoaded) {
             if (state.bookings.isEmpty) {
-              return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Icon(Icons.event_seat_outlined, size: 64.r, color: AppColors.muted),
-                SizedBox(height: 12.h),
-                Text('No bookings yet',
-                    style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.w800)),
-                SizedBox(height: 6.h),
-                Text('Book a table from any restaurant page',
-                    style: TextStyle(fontSize: 13.sp,
-                        color: AppColors.muted, fontWeight: FontWeight.w600)),
-              ]));
+              return Center(
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.event_seat_outlined, size: 64.r, color: AppColors.muted),
+                  SizedBox(height: 12.h),
+                  Text('No bookings yet',
+                      style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.w800)),
+                  SizedBox(height: 6.h),
+                  Text('Book a table from any restaurant page',
+                      style: TextStyle(fontSize: 13.sp,
+                          color: AppColors.muted, fontWeight: FontWeight.w600)),
+                ]),
+              );
             }
 
             return RefreshIndicator(
@@ -233,28 +244,39 @@ class _BookingCard extends StatelessWidget {
     }
   }
 
+  // ── Fixed payment state logic ──────────────────────────────────────────────
+  // BOOKED   + PENDING  → needs ₹19 payment
+  // CONFIRMED + PAID    → needs food payment
+  // CONFIRMED + FOOD_PAID → already paid, show order tracking
+  // anything else       → no payment action
+
+  bool get _needsBookingFee =>
+      booking.status == 'BOOKED' && booking.paymentStatus == 'PENDING';
+
   bool get _canPayForFood =>
       booking.status == 'CONFIRMED' && booking.paymentStatus == 'PAID';
 
-  bool get _needsPayment =>
-      booking.status == 'CONFIRMED' && booking.paymentStatus != 'PAID';
+  bool get _foodPaid =>
+      booking.paymentStatus == 'FOOD_PAID';
 
-  bool get _canCancel => booking.status == 'BOOKED';
+  bool get _canCancel =>
+      booking.status == 'BOOKED' && booking.paymentStatus == 'PENDING';
 
   @override
   Widget build(BuildContext context) {
+    // Border highlight based on action needed
+    final borderColor = _canPayForFood
+        ? AppColors.success.withOpacity(0.4)
+        : _needsBookingFee
+        ? AppColors.primary.withOpacity(0.4)
+        : Colors.black.withOpacity(0.05);
+    final borderWidth = (_canPayForFood || _needsBookingFee) ? 1.5 : 1.0;
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18.r),
-        border: Border.all(
-          color: _canPayForFood
-              ? AppColors.success.withOpacity(0.4)
-              : _needsPayment
-              ? AppColors.primary.withOpacity(0.4)
-              : Colors.black.withOpacity(0.05),
-          width: (_canPayForFood || _needsPayment) ? 1.5 : 1,
-        ),
+        border: Border.all(color: borderColor, width: borderWidth),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05),
             blurRadius: 12, offset: const Offset(0, 4))],
       ),
@@ -268,7 +290,8 @@ class _BookingCard extends StatelessWidget {
               width: 44.w, height: 44.w,
               decoration: BoxDecoration(color: AppColors.primarySoft,
                   borderRadius: BorderRadius.circular(14.r)),
-              child: Icon(Icons.event_seat_rounded, color: AppColors.primary, size: 22.sp),
+              child: Icon(Icons.event_seat_rounded,
+                  color: AppColors.primary, size: 22.sp),
             ),
             SizedBox(width: 10.w),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -316,8 +339,36 @@ class _BookingCard extends StatelessWidget {
           ]),
         ),
 
-        // ── Pay for food (confirmed + ₹19 paid) ──────────────────────────
-        if (_canPayForFood) ...[
+        // ── Food paid — show tracking link ────────────────────────────────
+        if (_foodPaid && booking.orderId != null) ...[
+          SizedBox(height: 12.h),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 14.w),
+            child: GestureDetector(
+              onTap: () => context.push('/order-tracking', extra: booking.orderId!),
+              child: Container(
+                padding: EdgeInsets.all(12.w),
+                decoration: BoxDecoration(
+                  color: AppColors.infoSoft,
+                  borderRadius: BorderRadius.circular(12.r),
+                  border: Border.all(color: AppColors.info.withOpacity(0.3)),
+                ),
+                child: Row(children: [
+                  Icon(Icons.receipt_long_rounded, color: AppColors.info, size: 18.sp),
+                  SizedBox(width: 10.w),
+                  Expanded(child: Text('Food order placed — tap to track',
+                      style: TextStyle(fontSize: 12.sp,
+                          fontWeight: FontWeight.w700, color: AppColors.info))),
+                  Icon(Icons.arrow_forward_ios_rounded,
+                      size: 12.sp, color: AppColors.info),
+                ]),
+              ),
+            ),
+          ),
+          SizedBox(height: 14.h),
+
+          // ── Pay for food (confirmed + ₹19 paid) ──────────────────────────
+        ] else if (_canPayForFood) ...[
           SizedBox(height: 12.h),
           Padding(
             padding: EdgeInsets.symmetric(horizontal: 14.w),
@@ -356,14 +407,16 @@ class _BookingCard extends StatelessWidget {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.success, foregroundColor: Colors.white,
                   elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12.r)),
                 ),
               ),
             ),
           ),
           SizedBox(height: 14.h),
 
-        ] else if (_needsPayment) ...[
+          // ── Pay ₹19 booking fee (BOOKED + PENDING) ─────────────────────
+        ] else if (_needsBookingFee) ...[
           SizedBox(height: 12.h),
           Padding(
             padding: EdgeInsets.symmetric(horizontal: 14.w),
@@ -379,33 +432,33 @@ class _BookingCard extends StatelessWidget {
                   }
                 },
                 icon: Icon(Icons.lock_rounded, size: 16.sp),
-                label: Text('Pay ₹19 to Confirm Table',
+                label: Text('Pay Booking Fee to Confirm',
                     style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w900)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary, foregroundColor: Colors.white,
                   elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.r)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12.r)),
                 ),
               ),
             ),
           ),
-          SizedBox(height: 14.h),
-
-        ] else if (_canCancel) ...[
-          SizedBox(height: 10.h),
-          Padding(
-            padding: EdgeInsets.fromLTRB(14.w, 0, 14.w, 14.h),
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: () => _showCancelDialog(context),
-                style: TextButton.styleFrom(foregroundColor: AppColors.danger),
-                child: Text('Cancel Booking',
-                    style: TextStyle(fontSize: 13.sp,
-                        fontWeight: FontWeight.w700, color: AppColors.danger)),
+          if (_canCancel) ...[
+            Padding(
+              padding: EdgeInsets.fromLTRB(14.w, 4.h, 14.w, 14.h),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => _showCancelDialog(context),
+                  child: Text('Cancel Booking',
+                      style: TextStyle(fontSize: 13.sp,
+                          fontWeight: FontWeight.w700, color: AppColors.danger)),
+                ),
               ),
             ),
-          ),
+          ] else
+            SizedBox(height: 14.h),
+
         ] else
           SizedBox(height: 14.h),
 
@@ -428,7 +481,7 @@ class _BookingCard extends StatelessWidget {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18.r)),
         title: Text('Cancel Booking',
             style: TextStyle(fontSize: 17.sp, fontWeight: FontWeight.w900)),
-        content: Text('Your ₹19 booking fee will be refunded.',
+        content: Text('Your booking fee will be refunded.',
             style: TextStyle(fontSize: 13.sp,
                 color: AppColors.muted, fontWeight: FontWeight.w600)),
         actions: [
@@ -441,7 +494,8 @@ class _BookingCard extends StatelessWidget {
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.danger, elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10.r)),
             ),
             onPressed: () {
               Navigator.pop(context);
