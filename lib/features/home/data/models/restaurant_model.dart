@@ -1,3 +1,5 @@
+// lib/features/home/data/models/restaurant_model.dart
+
 import '../../domain/entities/restaurant.dart';
 
 class RestaurantModel extends Restaurant {
@@ -15,6 +17,7 @@ class RestaurantModel extends Restaurant {
     super.city,
     super.latitude,
     super.longitude,
+    super.openingHours,
     super.dineInEnabled,
     super.takeawayEnabled,
     super.tableBookingEnabled,
@@ -23,8 +26,13 @@ class RestaurantModel extends Restaurant {
   factory RestaurantModel.fromJson(Map<String, dynamic> json) {
     final cuisine = (json['cuisine'] as List<dynamic>?)
         ?.map((e) => e.toString())
-        .toList() ??
-        [];
+        .toList() ?? [];
+
+    // Parse openingHours array from backend
+    final rawHours = json['openingHours'] as List<dynamic>?;
+    final openingHours = rawHours
+        ?.map((h) => Map<String, dynamic>.from(h as Map))
+        .toList();
 
     return RestaurantModel(
       id:                   json['_id']                as String,
@@ -41,7 +49,7 @@ class RestaurantModel extends Restaurant {
       city:                 json['city']                as String?,
       latitude:             (json['latitude']           as num?)?.toDouble(),
       longitude:            (json['longitude']          as num?)?.toDouble(),
-      // Service flags — default true/false if backend doesn't send them yet
+      openingHours:         openingHours,
       dineInEnabled:        json['dineInEnabled']       as bool? ?? true,
       takeawayEnabled:      json['takeawayEnabled']     as bool? ?? true,
       tableBookingEnabled:  json['tableBookingEnabled'] as bool? ?? false,

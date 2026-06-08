@@ -40,11 +40,8 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
   final   _searchCtrl      = TextEditingController();
   final   _scrollCtrl      = ScrollController();
 
-  // Category data
   Map<String, List<MenuItem>> _grouped  = {};
   List<String>                _catOrder = [];
-
-  // One GlobalKey per category — used to scroll to that section
   final Map<String, GlobalKey> _catKeys = {};
 
   @override
@@ -76,9 +73,9 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
   }
 
   String _distanceLabel(double km, String? city) {
-    if (_distanceKm != null)              return '${_distanceKm!.toStringAsFixed(1)} km';
-    if (km > 0)                           return '${km.toStringAsFixed(1)} km';
-    if (city != null && city.isNotEmpty)  return city;
+    if (_distanceKm != null)             return '${_distanceKm!.toStringAsFixed(1)} km';
+    if (km > 0)                          return '${km.toStringAsFixed(1)} km';
+    if (city != null && city.isNotEmpty) return city;
     return 'Nearby';
   }
 
@@ -90,7 +87,7 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
       if (!map.containsKey(cat)) {
         map[cat] = [];
         order.add(cat);
-        _catKeys[cat] = GlobalKey(); // assign a key per category
+        _catKeys[cat] = GlobalKey();
       }
       map[cat]!.add(item);
     }
@@ -111,19 +108,13 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
     return result;
   }
 
-  // ── Scroll to a category section ─────────────────────────────────────────
   void _scrollToCategory(String cat) {
     final key = _catKeys[cat];
     if (key?.currentContext == null) return;
-    Scrollable.ensureVisible(
-      key!.currentContext!,
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeInOut,
-      alignment: 0.0, // align to top
-    );
+    Scrollable.ensureVisible(key!.currentContext!,
+        duration: const Duration(milliseconds: 400), curve: Curves.easeInOut);
   }
 
-  // ── Show category picker sheet ────────────────────────────────────────────
   void _showCategoryPicker() {
     if (_catOrder.isEmpty) return;
     showModalBottomSheet(
@@ -137,7 +128,6 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
           borderRadius: BorderRadius.vertical(top: Radius.circular(24.r)),
         ),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          // Handle
           Padding(
             padding: EdgeInsets.only(top: 12.h, bottom: 8.h),
             child: Container(width: 44.w, height: 5.h,
@@ -156,7 +146,6 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
             ]),
           ),
           const Divider(height: 1),
-          // Category list
           Flexible(
             child: ListView.separated(
               padding: EdgeInsets.symmetric(vertical: 8.h),
@@ -169,7 +158,6 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                 return InkWell(
                   onTap: () {
                     Navigator.pop(context);
-                    // Small delay so sheet closes before scrolling
                     Future.delayed(const Duration(milliseconds: 300), () {
                       _scrollToCategory(cat);
                     });
@@ -177,7 +165,6 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                   child: Padding(
                     padding: EdgeInsets.symmetric(horizontal: 20.w, vertical: 14.h),
                     child: Row(children: [
-                      // Category initial avatar
                       Container(
                         width: 36.w, height: 36.w,
                         decoration: BoxDecoration(
@@ -191,14 +178,12 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                         )),
                       ),
                       SizedBox(width: 14.w),
-                      Expanded(child: Text(cat,
-                          style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w800))),
+                      Expanded(child: Text(cat, style: TextStyle(
+                          fontSize: 14.sp, fontWeight: FontWeight.w800))),
                       Container(
                         padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 3.h),
-                        decoration: BoxDecoration(
-                          color: AppColors.soft,
-                          borderRadius: BorderRadius.circular(99),
-                        ),
+                        decoration: BoxDecoration(color: AppColors.soft,
+                            borderRadius: BorderRadius.circular(99)),
                         child: Text('$count item${count != 1 ? "s" : ""}',
                             style: TextStyle(fontSize: 11.sp,
                                 fontWeight: FontWeight.w700, color: AppColors.muted)),
@@ -241,9 +226,9 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
             final r        = state.restaurant;
             final filtered = _filteredGroups();
             final cats     = filtered.keys.toList();
+            final openInfo = _computeOpenStatus(r);
 
             return Stack(children: [
-              // ── Main scroll view ─────────────────────────────────────────
               CustomScrollView(
                 controller: _scrollCtrl,
                 slivers: [
@@ -270,11 +255,54 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                         _InfoChip(icon: Icons.timer_outlined,
                             text: 'Ready in ${r.prepTimeMins} min'),
                       ]),
-                      SizedBox(height: 12.h),
+                      SizedBox(height: 10.h),
+
+                      // ── Open/Closed status + hours ──────────────────────
+                      _OpenStatusRow(restaurant: r, openInfo: openInfo),
+                      SizedBox(height: 10.h),
+
+                      // ── Closed banner ────────────────────────────────────
+                      if (!openInfo.isOpen) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: EdgeInsets.all(12.w),
+                          decoration: BoxDecoration(
+                            color: AppColors.dangerSoft,
+                            borderRadius: BorderRadius.circular(12.r),
+                            border: Border.all(color: AppColors.danger.withOpacity(0.3)),
+                          ),
+                          child: Row(children: [
+                            Icon(Icons.store_outlined,
+                                color: AppColors.danger, size: 18.sp),
+                            SizedBox(width: 8.w),
+                            Expanded(child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text('Currently Closed',
+                                  style: TextStyle(fontSize: 13.sp,
+                                      fontWeight: FontWeight.w900, color: AppColors.danger)),
+                              if (openInfo.reason != null)
+                                Text(openInfo.reason!,
+                                    style: TextStyle(fontSize: 11.sp,
+                                        color: AppColors.danger, fontWeight: FontWeight.w600)),
+                            ])),
+                          ]),
+                        ),
+                        SizedBox(height: 10.h),
+                      ],
+
                       _ServiceRow(restaurant: r),
                     ]),
                   )),
                   SliverToBoxAdapter(child: SizedBox(height: 16.h)),
+
+                  // Working hours section
+                  if (r.openingHours != null && r.openingHours!.isNotEmpty)
+                    SliverToBoxAdapter(child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16.w),
+                      child: _OpeningHoursCard(hours: r.openingHours!),
+                    )),
+                  if (r.openingHours != null && r.openingHours!.isNotEmpty)
+                    SliverToBoxAdapter(child: SizedBox(height: 16.h)),
 
                   // Search bar
                   SliverToBoxAdapter(child: Padding(
@@ -300,7 +328,7 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                   )),
                   SliverToBoxAdapter(child: SizedBox(height: 16.h)),
 
-                  // ── All categories + items (all shown at once for scroll-to) ──
+                  // Menu items
                   if (filtered.isEmpty)
                     SliverToBoxAdapter(child: Padding(
                       padding: EdgeInsets.only(top: 40.h),
@@ -321,12 +349,10 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                             if (idx >= cats.length) return null;
                             final cat   = cats[idx];
                             final items = filtered[cat] ?? [];
-
                             return Column(
-                              key: _catKeys[cat], // ← GlobalKey for scroll anchor
+                              key: _catKeys[cat],
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                // Category header
                                 Padding(
                                   padding: EdgeInsets.only(
                                       top: idx == 0 ? 0 : 24.h, bottom: 12.h),
@@ -335,15 +361,14 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                                         decoration: BoxDecoration(color: AppColors.primary,
                                             borderRadius: BorderRadius.circular(99))),
                                     SizedBox(width: 8.w),
-                                    Text(cat,
-                                        style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.w900)),
+                                    Text(cat, style: TextStyle(
+                                        fontSize: 16.sp, fontWeight: FontWeight.w900)),
                                     SizedBox(width: 8.w),
-                                    Text('(${items.length})',
-                                        style: TextStyle(fontSize: 12.sp,
-                                            color: AppColors.muted, fontWeight: FontWeight.w700)),
+                                    Text('(${items.length})', style: TextStyle(
+                                        fontSize: 12.sp, color: AppColors.muted,
+                                        fontWeight: FontWeight.w700)),
                                   ]),
                                 ),
-                                // Items
                                 ...items.asMap().entries.map((entry) {
                                   final i    = entry.key;
                                   final item = entry.value;
@@ -383,48 +408,38 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                 ],
               ),
 
-              // ── Floating category navigator button ───────────────────────
+              // Floating category navigator
               if (_catOrder.isNotEmpty && _searchQuery.isEmpty)
                 Positioned(
-                  right: 16.w,
-                  bottom: 90.h, // above cart button
+                  right: 16.w, bottom: 90.h,
                   child: GestureDetector(
                     onTap: _showCategoryPicker,
                     child: Container(
                       padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 10.h),
                       decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(99),
+                        color: Colors.white, borderRadius: BorderRadius.circular(99),
                         border: Border.all(color: AppColors.line),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.12),
-                            blurRadius: 16,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
+                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12),
+                            blurRadius: 16, offset: const Offset(0, 4))],
                       ),
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.menu_book_rounded,
-                            size: 18.sp, color: AppColors.primary),
+                        Icon(Icons.menu_book_rounded, size: 18.sp, color: AppColors.primary),
                         SizedBox(width: 6.w),
-                        Text('Menu',
-                            style: TextStyle(fontSize: 12.sp,
-                                fontWeight: FontWeight.w900, color: AppColors.primary)),
+                        Text('Menu', style: TextStyle(fontSize: 12.sp,
+                            fontWeight: FontWeight.w900, color: AppColors.primary)),
                       ]),
                     ),
                   ),
                 ),
 
-              // ── Sticky cart button ───────────────────────────────────────
+              // Cart button
               Positioned(
                 left: 16.w, right: 16.w, bottom: 16.h,
                 child: BlocBuilder<CartBloc, CartState>(
                   builder: (_, cart) {
                     final count = cart.items.fold<int>(0, (s, i) => s + i.qty);
                     if (count == 0) {
-                      return PrimaryButton(
-                          text: 'Go to cart',
+                      return PrimaryButton(text: 'Go to cart',
                           onTap: () => context.push('/cart'));
                     }
                     return GestureDetector(
@@ -442,17 +457,15 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                             width: 26.w, height: 26.w,
                             decoration: BoxDecoration(color: Colors.white.withOpacity(0.25),
                                 borderRadius: BorderRadius.circular(8.r)),
-                            child: Center(child: Text('$count',
-                                style: TextStyle(fontSize: 12.sp,
-                                    fontWeight: FontWeight.w900, color: Colors.white))),
+                            child: Center(child: Text('$count', style: TextStyle(
+                                fontSize: 12.sp, fontWeight: FontWeight.w900, color: Colors.white))),
                           ),
                           SizedBox(width: 12.w),
                           Text('View Cart', style: TextStyle(fontSize: 15.sp,
                               fontWeight: FontWeight.w900, color: Colors.white)),
                           const Spacer(),
-                          Text('₹${cart.total.toStringAsFixed(0)}',
-                              style: TextStyle(fontSize: 15.sp,
-                                  fontWeight: FontWeight.w900, color: Colors.white)),
+                          Text('₹${cart.total.toStringAsFixed(0)}', style: TextStyle(
+                              fontSize: 15.sp, fontWeight: FontWeight.w900, color: Colors.white)),
                           SizedBox(width: 4.w),
                           Icon(Icons.arrow_forward_ios_rounded, size: 14.sp, color: Colors.white),
                         ]),
@@ -465,6 +478,196 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
           },
         ),
       ),
+    );
+  }
+
+  /// Compute open/closed from restaurant.isOpen + openingHours
+  _OpenInfo _computeOpenStatus(Restaurant r) {
+    if (!r.isOpen) return _OpenInfo(false, 'Restaurant is currently closed');
+
+    final hours = r.openingHours;
+    if (hours == null || hours.isEmpty) return _OpenInfo(true, null);
+
+    final now    = DateTime.now();
+    final days   = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+    final dayStr = days[now.weekday - 1]; // weekday 1=Mon
+    final todayH = hours.cast<Map<String, dynamic>>()
+        .where((h) => h['day'] == dayStr)
+        .firstOrNull;
+
+    if (todayH == null) return _OpenInfo(true, null);
+    if (todayH['isClosed'] == true) return _OpenInfo(false, 'Closed today');
+
+    final openMins  = _parseTime(todayH['open']  as String?);
+    final closeMins = _parseTime(todayH['close'] as String?);
+    if (openMins == null || closeMins == null) return _OpenInfo(true, null);
+
+    final nowMins = now.hour * 60 + now.minute;
+    if (nowMins < openMins)  return _OpenInfo(false, 'Opens at ${todayH["open"]}');
+    if (nowMins >= closeMins) return _OpenInfo(false, 'Closed — reopens tomorrow');
+
+    return _OpenInfo(true, 'Closes at ${todayH["close"]}');
+  }
+
+  int? _parseTime(String? s) {
+    if (s == null) return null;
+    final t = s.trim().toUpperCase();
+    final m12 = RegExp(r'^(\d{1,2}):(\d{2})\s*(AM|PM)$').firstMatch(t);
+    if (m12 != null) {
+      int h = int.parse(m12.group(1)!);
+      final m = int.parse(m12.group(2)!);
+      if (m12.group(3) == 'PM' && h != 12) h += 12;
+      if (m12.group(3) == 'AM' && h == 12) h = 0;
+      return h * 60 + m;
+    }
+    final m24 = RegExp(r'^(\d{1,2}):(\d{2})$').firstMatch(t);
+    if (m24 != null) return int.parse(m24.group(1)!) * 60 + int.parse(m24.group(2)!);
+    return null;
+  }
+}
+
+class _OpenInfo {
+  final bool    isOpen;
+  final String? reason;
+  const _OpenInfo(this.isOpen, this.reason);
+}
+
+// ── Open status row ───────────────────────────────────────────────────────────
+class _OpenStatusRow extends StatelessWidget {
+  final Restaurant restaurant;
+  final _OpenInfo  openInfo;
+  const _OpenStatusRow({required this.restaurant, required this.openInfo});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = openInfo.isOpen ? AppColors.success : AppColors.danger;
+    final label = openInfo.isOpen ? 'Open Now' : 'Closed';
+    final sub   = openInfo.reason;
+
+    return Row(children: [
+      Container(
+        padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 5.h),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(8.r),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: 7.w, height: 7.w,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
+          SizedBox(width: 5.w),
+          Text(label, style: TextStyle(fontSize: 12.sp,
+              fontWeight: FontWeight.w800, color: color)),
+        ]),
+      ),
+      if (sub != null) ...[
+        SizedBox(width: 8.w),
+        Text(sub, style: TextStyle(fontSize: 11.sp,
+            color: AppColors.muted, fontWeight: FontWeight.w600)),
+      ],
+    ]);
+  }
+}
+
+// ── Opening hours card ────────────────────────────────────────────────────────
+class _OpeningHoursCard extends StatefulWidget {
+  final List<Map<String, dynamic>> hours;
+  const _OpeningHoursCard({required this.hours});
+
+  @override
+  State<_OpeningHoursCard> createState() => _OpeningHoursCardState();
+}
+
+class _OpeningHoursCardState extends State<_OpeningHoursCard> {
+  bool _expanded = false;
+
+  static const _dayLabels = {
+    'MON': 'Monday', 'TUE': 'Tuesday', 'WED': 'Wednesday',
+    'THU': 'Thursday', 'FRI': 'Friday', 'SAT': 'Saturday', 'SUN': 'Sunday',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final now    = DateTime.now();
+    final days   = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+    final todayKey = days[now.weekday - 1];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white, borderRadius: BorderRadius.circular(16.r),
+        border: Border.all(color: AppColors.line),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
+            blurRadius: 8, offset: const Offset(0, 3))],
+      ),
+      child: Column(children: [
+        InkWell(
+          borderRadius: BorderRadius.circular(16.r),
+          onTap: () => setState(() => _expanded = !_expanded),
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 12.h),
+            child: Row(children: [
+              Icon(Icons.access_time_rounded, size: 18.sp, color: AppColors.primary),
+              SizedBox(width: 8.w),
+              Text('Opening Hours', style: TextStyle(
+                  fontSize: 13.sp, fontWeight: FontWeight.w900)),
+              const Spacer(),
+              Icon(_expanded ? Icons.expand_less : Icons.expand_more,
+                  size: 20.sp, color: AppColors.muted),
+            ]),
+          ),
+        ),
+        if (_expanded) ...[
+          Divider(height: 1, color: AppColors.line),
+          Padding(
+            padding: EdgeInsets.all(14.w),
+            child: Column(
+              children: widget.hours.map((h) {
+                final day      = h['day']      as String? ?? '';
+                final open     = h['open']     as String? ?? '';
+                final close    = h['close']    as String? ?? '';
+                final isClosed = h['isClosed'] as bool?   ?? false;
+                final isToday  = day == todayKey;
+
+                return Padding(
+                  padding: EdgeInsets.only(bottom: 8.h),
+                  child: Row(children: [
+                    SizedBox(
+                      width: 88.w,
+                      child: Text(_dayLabels[day] ?? day,
+                          style: TextStyle(
+                            fontSize: 12.sp,
+                            fontWeight: isToday ? FontWeight.w900 : FontWeight.w600,
+                            color: isToday ? AppColors.primary : AppColors.text,
+                          )),
+                    ),
+                    if (isToday)
+                      Container(
+                        margin: EdgeInsets.only(right: 6.w),
+                        padding: EdgeInsets.symmetric(horizontal: 5.w, vertical: 2.h),
+                        decoration: BoxDecoration(
+                          color: AppColors.primarySoft,
+                          borderRadius: BorderRadius.circular(4.r),
+                        ),
+                        child: Text('Today', style: TextStyle(
+                            fontSize: 9.sp, fontWeight: FontWeight.w800,
+                            color: AppColors.primary)),
+                      ),
+                    const Spacer(),
+                    Text(
+                      isClosed ? 'Closed' : '$open – $close',
+                      style: TextStyle(
+                        fontSize: 12.sp,
+                        fontWeight: FontWeight.w700,
+                        color: isClosed ? AppColors.danger : AppColors.text,
+                      ),
+                    ),
+                  ]),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ]),
     );
   }
 }
@@ -514,7 +717,7 @@ class _CoverSection extends StatelessWidget {
   }
 }
 
-// ── Menu Card ─────────────────────────────────────────────────────────────────
+// ── Menu card ─────────────────────────────────────────────────────────────────
 class _MenuCard extends StatelessWidget {
   final MenuItem item; final int qty;
   final VoidCallback onAdd; final VoidCallback onIncrease; final VoidCallback onDecrease;
@@ -523,9 +726,9 @@ class _MenuCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dotColor       = item.isVeg ? AppColors.success : AppColors.danger;
-    final hasDiscount    = item.hasDiscount;
-    final effectivePrice = item.effectivePrice;
+    final dotColor    = item.isVeg ? AppColors.success : AppColors.danger;
+    final hasDiscount = item.hasDiscount;
+    final effPrice    = item.effectivePrice;
 
     return Container(
       padding: EdgeInsets.all(14.w),
@@ -557,14 +760,13 @@ class _MenuCard extends StatelessWidget {
           ],
           SizedBox(height: 6.h),
           if (hasDiscount) ...[
-            Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-              Text('₹${effectivePrice.toStringAsFixed(0)}',
-                  style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w900, color: AppColors.primary)),
+            Row(children: [
+              Text('₹${effPrice.toStringAsFixed(0)}', style: TextStyle(
+                  fontSize: 14.sp, fontWeight: FontWeight.w900, color: AppColors.primary)),
               SizedBox(width: 6.w),
-              Text('₹${item.price.toStringAsFixed(0)}',
-                  style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.w600,
-                      color: AppColors.muted, decoration: TextDecoration.lineThrough,
-                      decorationColor: AppColors.muted)),
+              Text('₹${item.price.toStringAsFixed(0)}', style: TextStyle(
+                  fontSize: 12.sp, fontWeight: FontWeight.w600, color: AppColors.muted,
+                  decoration: TextDecoration.lineThrough, decorationColor: AppColors.muted)),
             ]),
             SizedBox(height: 3.h),
             Container(
@@ -572,12 +774,12 @@ class _MenuCard extends StatelessWidget {
               decoration: BoxDecoration(color: AppColors.successSoft,
                   borderRadius: BorderRadius.circular(5.r),
                   border: Border.all(color: AppColors.success.withOpacity(0.3))),
-              child: Text(item.discountLabel,
-                  style: TextStyle(fontSize: 10.sp, fontWeight: FontWeight.w800, color: AppColors.success)),
+              child: Text(item.discountLabel, style: TextStyle(
+                  fontSize: 10.sp, fontWeight: FontWeight.w800, color: AppColors.success)),
             ),
           ] else
-            Text('₹${item.price.toStringAsFixed(0)}',
-                style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w900, color: AppColors.primary)),
+            Text('₹${item.price.toStringAsFixed(0)}', style: TextStyle(
+                fontSize: 14.sp, fontWeight: FontWeight.w900, color: AppColors.primary)),
         ])),
         SizedBox(width: 10.w),
         Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
@@ -620,7 +822,7 @@ class _MenuCard extends StatelessWidget {
   }
 }
 
-// ── Service Row ───────────────────────────────────────────────────────────────
+// ── Service row ───────────────────────────────────────────────────────────────
 class _ServiceRow extends StatelessWidget {
   final Restaurant restaurant;
   const _ServiceRow({required this.restaurant});
@@ -681,7 +883,7 @@ class _ServiceRow extends StatelessWidget {
     switch (t) {
       case OrderType.dineIn:       return 'Dine-In — sit and enjoy your meal';
       case OrderType.takeAway:     return 'Takeaway — pick up at the counter';
-      case OrderType.tableBooking: return 'Table Booking — reserve your table (+₹19)';
+      case OrderType.tableBooking: return 'Table Booking — reserve your table';
     }
   }
 }
@@ -700,7 +902,8 @@ class _OrderTypeChip extends StatelessWidget {
       decoration: BoxDecoration(
         color: selected ? color.withOpacity(0.12) : Colors.black.withOpacity(0.04),
         borderRadius: BorderRadius.circular(10.r),
-        border: Border.all(color: selected ? color.withOpacity(0.5) : Colors.black.withOpacity(0.08),
+        border: Border.all(
+            color: selected ? color.withOpacity(0.5) : Colors.black.withOpacity(0.08),
             width: selected ? 1.5 : 1),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -713,21 +916,18 @@ class _OrderTypeChip extends StatelessWidget {
   );
 }
 
-// ── Small Widgets ──────────────────────────────────────────────────────────────
+// ── Small widgets ─────────────────────────────────────────────────────────────
 class _CoverPlaceholder extends StatelessWidget {
   @override
-  Widget build(BuildContext context) => Container(
-      color: const Color(0xFFEFEFEF),
+  Widget build(_) => Container(color: const Color(0xFFEFEFEF),
       child: const Center(child: Icon(Icons.restaurant, size: 64, color: Colors.black26)));
 }
 
 class _ItemPlaceholder extends StatelessWidget {
   @override
-  Widget build(BuildContext context) => ClipRRect(
-    borderRadius: BorderRadius.circular(12),
-    child: Container(color: const Color(0xFFEFEFEF),
-        child: const Icon(Icons.fastfood, size: 28, color: Colors.black38)),
-  );
+  Widget build(_) => ClipRRect(borderRadius: BorderRadius.circular(12),
+      child: Container(color: const Color(0xFFEFEFEF),
+          child: const Icon(Icons.fastfood, size: 28, color: Colors.black38)));
 }
 
 class _CircleIcon extends StatelessWidget {

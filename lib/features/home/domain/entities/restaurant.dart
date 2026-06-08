@@ -1,3 +1,5 @@
+// lib/features/home/domain/entities/restaurant.dart
+
 class Restaurant {
   final String       id;
   final String       name;
@@ -12,11 +14,10 @@ class Restaurant {
   final String?      city;
   final double?      latitude;
   final double?      longitude;
-
-  // ── Service flags — what order types the partner has enabled ──────────────
-  final bool dineInEnabled;
-  final bool takeawayEnabled;
-  final bool tableBookingEnabled;
+  final List<Map<String, dynamic>>? openingHours;
+  final bool         dineInEnabled;
+  final bool         takeawayEnabled;
+  final bool         tableBookingEnabled;
 
   const Restaurant({
     required this.id,
@@ -32,6 +33,7 @@ class Restaurant {
     this.city,
     this.latitude,
     this.longitude,
+    this.openingHours,
     this.dineInEnabled       = true,
     this.takeawayEnabled     = true,
     this.tableBookingEnabled = false,
