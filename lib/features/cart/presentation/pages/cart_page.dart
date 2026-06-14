@@ -11,7 +11,8 @@ import '../bloc/cart_event.dart';
 import '../bloc/cart_state.dart';
 
 class CartPage extends StatelessWidget {
-  const CartPage({super.key});
+  final String? closeTime; // passed from restaurant detail page
+  const CartPage({super.key, this.closeTime});
 
   @override
   Widget build(BuildContext context) {
@@ -153,13 +154,13 @@ class CartPage extends StatelessWidget {
                           isTableBooking: isTableBooking,
                           onTap: () {
                             if (isTableBooking) {
-                              // Pay ₹19 FIRST → booking created on payment success
                               context.push('/booking-pre-payment', extra: {
                                 'restaurantId': state.items.first.restaurantId,
                                 'branchId':     state.items.first.branchId,
                               });
                             } else {
-                              context.push('/checkout');
+                              context.push('/checkout',
+                                  extra: {'closeTime': closeTime});
                             }
                           },
                         );

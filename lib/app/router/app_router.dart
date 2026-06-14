@@ -70,9 +70,23 @@ class AppRouter {
           );
         },
       ),
-      GoRoute(path: '/cart',     builder: (_, __) => const CartPage()),
-      GoRoute(path: '/checkout', builder: (_, __) => const CheckoutPage()),
-      GoRoute(path: '/profile',  builder: (_, __) => const ProfilePage()),
+      GoRoute(
+        path: '/cart',
+        builder: (_, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return CartPage(
+            closeTime: extra?['closeTime'] as String?,
+          );
+        },
+      ),      GoRoute(
+        path: '/checkout',
+        builder: (_, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return CheckoutPage(
+            closeTime: extra?['closeTime'] as String?,
+          );
+        },
+      ),      GoRoute(path: '/profile',  builder: (_, __) => const ProfilePage()),
       GoRoute(
         path: '/order-tracking',
         builder: (_, state) =>

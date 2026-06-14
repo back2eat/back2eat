@@ -1,5 +1,7 @@
 // 📱 CUSTOMER APP
 // lib/features/home/presentation/pages/restaurant_detail_page.dart
+// CHANGE: Removed _OpeningHoursCard widget and its section
+// CHANGE: Added closeTime getter exposed via state for cart/checkout to use
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -204,42 +206,43 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
   }
 
   // ── Branch-aware open status ───────────────────────────────────────────────
-  // Each branch has its own isOpen toggle + openTime/closeTime.
-  // This means closing one branch does NOT affect other branches.
   _OpenInfo _computeBranchOpenStatus(RestaurantDetailLoaded state) {
-    // Branch toggle is authoritative for this outlet
     if (!state.branchIsOpen) {
       return _OpenInfo(false, 'This outlet is currently closed');
     }
-
-    // Check branch openTime / closeTime (24hr "09:00")
     final openMins  = _parseTime(state.branchOpenTime);
     final closeMins = _parseTime(state.branchCloseTime);
-
     if (openMins != null && closeMins != null) {
       final now     = DateTime.now();
       final nowMins = now.hour * 60 + now.minute;
-
       if (nowMins < openMins) {
         return _OpenInfo(false, 'Opens at ${_fmtMins(openMins)}');
       }
       if (nowMins >= closeMins) {
-        return _OpenInfo(false,
-            'Closed — reopens at ${_fmtMins(openMins)} tomorrow');
+        return _OpenInfo(false, 'Closed — reopens at ${_fmtMins(openMins)} tomorrow');
       }
       return _OpenInfo(true, 'Closes at ${_fmtMins(closeMins)}');
     }
-
-    // Fallback: restaurant-level schedule
     return _computeRestaurantOpenStatus(state.restaurant);
   }
 
-  // ── Restaurant-level schedule fallback ────────────────────────────────────
+  // ── Get today's close time from restaurant openingHours ───────────────────
+  String? _getTodayCloseTime(Restaurant r) {
+    final hours = r.openingHours;
+    if (hours == null || hours.isEmpty) return null;
+    final days   = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+    final dayStr = days[DateTime.now().weekday - 1];
+    final today  = hours.cast<Map<String, dynamic>>()
+        .where((h) => h['day'] == dayStr)
+        .firstOrNull;
+    if (today == null || today['isClosed'] == true) return null;
+    return today['close'] as String?;
+  }
+
   _OpenInfo _computeRestaurantOpenStatus(Restaurant r) {
     if (!r.isOpen) return _OpenInfo(false, 'Restaurant is currently closed');
     final hours = r.openingHours;
     if (hours == null || hours.isEmpty) return _OpenInfo(true, null);
-
     final now    = DateTime.now();
     final days   = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
     final dayStr = days[now.weekday - 1];
@@ -247,20 +250,16 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
         .where((h) => h['day'] == dayStr);
     if (matches.isEmpty) return _OpenInfo(true, null);
     final todayH = matches.first;
-
     if (todayH['isClosed'] == true) return _OpenInfo(false, 'Closed today');
-
     final openMins  = _parseTime(todayH['open']  as String?);
     final closeMins = _parseTime(todayH['close'] as String?);
     if (openMins == null || closeMins == null) return _OpenInfo(true, null);
-
     final nowMins = now.hour * 60 + now.minute;
     if (nowMins < openMins)   return _OpenInfo(false, 'Opens at ${todayH["open"]}');
     if (nowMins >= closeMins) return _OpenInfo(false, 'Closed — reopens tomorrow');
     return _OpenInfo(true, 'Closes at ${todayH["close"]}');
   }
 
-  // ── Time helpers ──────────────────────────────────────────────────────────
   int? _parseTime(String? s) {
     if (s == null) return null;
     final t   = s.trim().toUpperCase();
@@ -314,9 +313,12 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
             final r        = state.restaurant;
             final filtered = _filteredGroups();
             final cats     = filtered.keys.toList();
-
-            // ── Branch-aware open status ─────────────────────────────────
             final openInfo = _computeBranchOpenStatus(state);
+
+            // Get today's close time to pass to checkout
+            final todayCloseTime = state.branchCloseTime?.isNotEmpty == true
+                ? state.branchCloseTime
+                : _getTodayCloseTime(r);
 
             return Stack(children: [
               CustomScrollView(
@@ -348,6 +350,10 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                             text: _distanceLabel(r.distanceKm, r.city)),
                         _InfoChip(icon: Icons.timer_outlined,
                             text: 'Ready in ${r.prepTimeMins} min'),
+                        // Show close time chip if available
+                        if (todayCloseTime != null && openInfo.isOpen)
+                          _InfoChip(icon: Icons.access_time_rounded,
+                              text: 'Closes at $todayCloseTime'),
                       ]),
                       SizedBox(height: 10.h),
 
@@ -393,14 +399,8 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                   )),
                   SliverToBoxAdapter(child: SizedBox(height: 16.h)),
 
-                  // Opening hours card (restaurant schedule)
-                  if (r.openingHours != null && r.openingHours!.isNotEmpty) ...[
-                    SliverToBoxAdapter(child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 16.w),
-                      child: _OpeningHoursCard(hours: r.openingHours!),
-                    )),
-                    SliverToBoxAdapter(child: SizedBox(height: 16.h)),
-                  ],
+                  // ── Opening hours card REMOVED ─────────────────────────
+                  // Close time is shown in the info chips above instead
 
                   // Search bar
                   SliverToBoxAdapter(child: Padding(
@@ -469,12 +469,10 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                                     Container(width: 4.w, height: 20.h,
                                         decoration: BoxDecoration(
                                             color: AppColors.primary,
-                                            borderRadius:
-                                            BorderRadius.circular(99))),
+                                            borderRadius: BorderRadius.circular(99))),
                                     SizedBox(width: 8.w),
                                     Text(cat, style: TextStyle(
-                                        fontSize: 16.sp,
-                                        fontWeight: FontWeight.w900)),
+                                        fontSize: 16.sp, fontWeight: FontWeight.w900)),
                                     SizedBox(width: 8.w),
                                     Text('(${items.length})',
                                         style: TextStyle(fontSize: 12.sp,
@@ -487,33 +485,27 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                                   final item = entry.value;
                                   return Padding(
                                     padding: EdgeInsets.only(
-                                        bottom: i < items.length - 1
-                                            ? 12.h : 0),
+                                        bottom: i < items.length - 1 ? 12.h : 0),
                                     child: BlocBuilder<CartBloc, CartState>(
                                       builder: (context, cartState) {
                                         final cartLine = cartState.items
-                                            .where((x) =>
-                                        x.menuItemId == item.id)
+                                            .where((x) => x.menuItemId == item.id)
                                             .firstOrNull;
                                         final qty = cartLine?.qty ?? 0;
                                         return _MenuCard(
                                           item: item, qty: qty,
-                                          onAdd: () => context
-                                              .read<CartBloc>()
-                                              .add(AddToCartEvent(
-                                            restaurantId:   r.id,
-                                            restaurantName: r.name,
-                                            branchId:
-                                            state.branchId ?? '',
-                                            menuItemId:     item.id,
-                                            name:           item.name,
-                                            price: item.effectivePrice,
-                                          )),
-                                          onIncrease: () => context
-                                              .read<CartBloc>()
+                                          onAdd: () => context.read<CartBloc>().add(
+                                              AddToCartEvent(
+                                                restaurantId:   r.id,
+                                                restaurantName: r.name,
+                                                branchId:       state.branchId ?? '',
+                                                menuItemId:     item.id,
+                                                name:           item.name,
+                                                price:          item.effectivePrice,
+                                              )),
+                                          onIncrease: () => context.read<CartBloc>()
                                               .add(IncreaseQtyEvent(item.id)),
-                                          onDecrease: () => context
-                                              .read<CartBloc>()
+                                          onDecrease: () => context.read<CartBloc>()
                                               .add(DecreaseQtyEvent(item.id)),
                                         );
                                       },
@@ -537,8 +529,7 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                   child: GestureDetector(
                     onTap: _showCategoryPicker,
                     child: Container(
-                      padding: EdgeInsets.symmetric(
-                          horizontal: 14.w, vertical: 10.h),
+                      padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 10.h),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(99),
@@ -552,8 +543,7 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                             size: 18.sp, color: AppColors.primary),
                         SizedBox(width: 6.w),
                         Text('Menu', style: TextStyle(fontSize: 12.sp,
-                            fontWeight: FontWeight.w900,
-                            color: AppColors.primary)),
+                            fontWeight: FontWeight.w900, color: AppColors.primary)),
                       ]),
                     ),
                   ),
@@ -564,15 +554,16 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                 left: 16.w, right: 16.w, bottom: 16.h,
                 child: BlocBuilder<CartBloc, CartState>(
                   builder: (_, cart) {
-                    final count =
-                    cart.items.fold<int>(0, (s, i) => s + i.qty);
+                    final count = cart.items.fold<int>(0, (s, i) => s + i.qty);
                     if (count == 0) {
                       return PrimaryButton(
                           text: 'Go to cart',
-                          onTap: () => context.push('/cart'));
+                          onTap: () => context.push('/cart',
+                              extra: {'closeTime': todayCloseTime}));
                     }
                     return GestureDetector(
-                      onTap: () => context.push('/cart'),
+                      onTap: () => context.push('/cart',
+                          extra: {'closeTime': todayCloseTime}),
                       child: Container(
                         padding: EdgeInsets.symmetric(
                             horizontal: 20.w, vertical: 14.h),
@@ -581,8 +572,7 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                           borderRadius: BorderRadius.circular(16.r),
                           boxShadow: [BoxShadow(
                               color: AppColors.primary.withOpacity(0.35),
-                              blurRadius: 16,
-                              offset: const Offset(0, 6))],
+                              blurRadius: 16, offset: const Offset(0, 6))],
                         ),
                         child: Row(children: [
                           Container(
@@ -597,13 +587,11 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                           ),
                           SizedBox(width: 12.w),
                           Text('View Cart', style: TextStyle(fontSize: 15.sp,
-                              fontWeight: FontWeight.w900,
-                              color: Colors.white)),
+                              fontWeight: FontWeight.w900, color: Colors.white)),
                           const Spacer(),
                           Text('₹${cart.total.toStringAsFixed(0)}',
                               style: TextStyle(fontSize: 15.sp,
-                                  fontWeight: FontWeight.w900,
-                                  color: Colors.white)),
+                                  fontWeight: FontWeight.w900, color: Colors.white)),
                           SizedBox(width: 4.w),
                           Icon(Icons.arrow_forward_ios_rounded,
                               size: 14.sp, color: Colors.white),
@@ -621,23 +609,21 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
   }
 }
 
-// ── Open info model ───────────────────────────────────────────────────────────
+// ── Models & small widgets (unchanged) ───────────────────────────────────────
+
 class _OpenInfo {
   final bool    isOpen;
   final String? reason;
   const _OpenInfo(this.isOpen, this.reason);
 }
 
-// ── Open status badge row ─────────────────────────────────────────────────────
 class _OpenStatusRow extends StatelessWidget {
   final _OpenInfo openInfo;
   const _OpenStatusRow({required this.openInfo});
-
   @override
   Widget build(BuildContext context) {
     final color = openInfo.isOpen ? AppColors.success : AppColors.danger;
     final label = openInfo.isOpen ? 'Open Now' : 'Closed';
-
     return Row(children: [
       Container(
         padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 5.h),
@@ -663,108 +649,12 @@ class _OpenStatusRow extends StatelessWidget {
   }
 }
 
-// ── Opening hours card ────────────────────────────────────────────────────────
-class _OpeningHoursCard extends StatefulWidget {
-  final List<Map<String, dynamic>> hours;
-  const _OpeningHoursCard({required this.hours});
-
-  @override
-  State<_OpeningHoursCard> createState() => _OpeningHoursCardState();
-}
-
-class _OpeningHoursCardState extends State<_OpeningHoursCard> {
-  bool _expanded = false;
-
-  static const _dayLabels = {
-    'MON': 'Monday', 'TUE': 'Tuesday', 'WED': 'Wednesday',
-    'THU': 'Thursday', 'FRI': 'Friday', 'SAT': 'Saturday', 'SUN': 'Sunday',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final todayKey = ['MON','TUE','WED','THU','FRI','SAT','SUN']
-    [DateTime.now().weekday - 1];
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16.r),
-        border: Border.all(color: AppColors.line),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
-            blurRadius: 8, offset: const Offset(0, 3))],
-      ),
-      child: Column(children: [
-        InkWell(
-          borderRadius: BorderRadius.circular(16.r),
-          onTap: () => setState(() => _expanded = !_expanded),
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 12.h),
-            child: Row(children: [
-              Icon(Icons.access_time_rounded, size: 18.sp, color: AppColors.primary),
-              SizedBox(width: 8.w),
-              Text('Opening Hours',
-                  style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w900)),
-              const Spacer(),
-              Icon(_expanded ? Icons.expand_less : Icons.expand_more,
-                  size: 20.sp, color: AppColors.muted),
-            ]),
-          ),
-        ),
-        if (_expanded) ...[
-          Divider(height: 1, color: AppColors.line),
-          Padding(
-            padding: EdgeInsets.all(14.w),
-            child: Column(children: widget.hours.map((h) {
-              final day      = h['day']      as String? ?? '';
-              final open     = h['open']     as String? ?? '';
-              final close    = h['close']    as String? ?? '';
-              final isClosed = h['isClosed'] as bool?   ?? false;
-              final isToday  = day == todayKey;
-              return Padding(
-                padding: EdgeInsets.only(bottom: 8.h),
-                child: Row(children: [
-                  SizedBox(
-                    width: 88.w,
-                    child: Text(_dayLabels[day] ?? day, style: TextStyle(
-                        fontSize: 12.sp,
-                        fontWeight: isToday ? FontWeight.w900 : FontWeight.w600,
-                        color: isToday ? AppColors.primary : AppColors.text)),
-                  ),
-                  if (isToday)
-                    Container(
-                      margin: EdgeInsets.only(right: 6.w),
-                      padding: EdgeInsets.symmetric(
-                          horizontal: 5.w, vertical: 2.h),
-                      decoration: BoxDecoration(
-                          color: AppColors.primarySoft,
-                          borderRadius: BorderRadius.circular(4.r)),
-                      child: Text('Today', style: TextStyle(fontSize: 9.sp,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.primary)),
-                    ),
-                  const Spacer(),
-                  Text(isClosed ? 'Closed' : '$open – $close',
-                      style: TextStyle(fontSize: 12.sp,
-                          fontWeight: FontWeight.w700,
-                          color: isClosed ? AppColors.danger : AppColors.text)),
-                ]),
-              );
-            }).toList()),
-          ),
-        ],
-      ]),
-    );
-  }
-}
-
-// ── Cover section ─────────────────────────────────────────────────────────────
 class _CoverSection extends StatelessWidget {
   final Restaurant   restaurant;
   final VoidCallback onBack;
   final VoidCallback onCart;
   const _CoverSection(
       {required this.restaurant, required this.onBack, required this.onCart});
-
   @override
   Widget build(BuildContext context) {
     final r = restaurant;
@@ -801,32 +691,24 @@ class _CoverSection extends StatelessWidget {
                 ]),
           )),
         Positioned(left: 16.w, top: 52.h,
-            child: _CircleIcon(
-                icon: Icons.arrow_back_ios_new_rounded, onTap: onBack)),
+            child: _CircleIcon(icon: Icons.arrow_back_ios_new_rounded, onTap: onBack)),
         Positioned(right: 16.w, top: 52.h,
-            child: _CircleIcon(
-                icon: Icons.shopping_bag_outlined, onTap: onCart)),
+            child: _CircleIcon(icon: Icons.shopping_bag_outlined, onTap: onCart)),
       ]),
     );
   }
 }
 
-// ── Menu card ─────────────────────────────────────────────────────────────────
 class _MenuCard extends StatelessWidget {
-  final MenuItem     item;
-  final int          qty;
-  final VoidCallback onAdd;
-  final VoidCallback onIncrease;
-  final VoidCallback onDecrease;
+  final MenuItem item; final int qty;
+  final VoidCallback onAdd, onIncrease, onDecrease;
   const _MenuCard({required this.item, required this.qty,
     required this.onAdd, required this.onIncrease, required this.onDecrease});
-
   @override
   Widget build(BuildContext context) {
     final dotColor    = item.isVeg ? AppColors.success : AppColors.danger;
     final hasDiscount = item.hasDiscount;
     final effPrice    = item.effectivePrice;
-
     return Container(
       padding: EdgeInsets.all(14.w),
       decoration: BoxDecoration(
@@ -844,50 +726,43 @@ class _MenuCard extends StatelessWidget {
                 border: Border.all(color: dotColor, width: 1.5),
                 borderRadius: BorderRadius.circular(2.r)),
             child: Center(child: Container(width: 7.w, height: 7.w,
-                decoration: BoxDecoration(
-                    shape: BoxShape.circle, color: dotColor))),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: dotColor))),
           ),
         ),
         SizedBox(width: 10.w),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(item.name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w900)),
-              if (item.description.isNotEmpty) ...[
-                SizedBox(height: 3.h),
-                Text(item.description, maxLines: 2, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12.sp,
-                        color: AppColors.muted, fontWeight: FontWeight.w600)),
-              ],
-              SizedBox(height: 6.h),
-              if (hasDiscount) ...[
-                Row(children: [
-                  Text('₹${effPrice.toStringAsFixed(0)}', style: TextStyle(
-                      fontSize: 14.sp, fontWeight: FontWeight.w900,
-                      color: AppColors.primary)),
-                  SizedBox(width: 6.w),
-                  Text('₹${item.price.toStringAsFixed(0)}', style: TextStyle(
-                      fontSize: 12.sp, fontWeight: FontWeight.w600,
-                      color: AppColors.muted,
-                      decoration: TextDecoration.lineThrough,
-                      decorationColor: AppColors.muted)),
-                ]),
-                SizedBox(height: 3.h),
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
-                  decoration: BoxDecoration(color: AppColors.successSoft,
-                      borderRadius: BorderRadius.circular(5.r),
-                      border: Border.all(
-                          color: AppColors.success.withOpacity(0.3))),
-                  child: Text(item.discountLabel, style: TextStyle(
-                      fontSize: 10.sp, fontWeight: FontWeight.w800,
-                      color: AppColors.success)),
-                ),
-              ] else
-                Text('₹${item.price.toStringAsFixed(0)}', style: TextStyle(
-                    fontSize: 14.sp, fontWeight: FontWeight.w900,
-                    color: AppColors.primary)),
-            ])),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(item.name, maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w900)),
+          if (item.description.isNotEmpty) ...[
+            SizedBox(height: 3.h),
+            Text(item.description, maxLines: 2, overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12.sp,
+                    color: AppColors.muted, fontWeight: FontWeight.w600)),
+          ],
+          SizedBox(height: 6.h),
+          if (hasDiscount) ...[
+            Row(children: [
+              Text('₹${effPrice.toStringAsFixed(0)}', style: TextStyle(
+                  fontSize: 14.sp, fontWeight: FontWeight.w900, color: AppColors.primary)),
+              SizedBox(width: 6.w),
+              Text('₹${item.price.toStringAsFixed(0)}', style: TextStyle(
+                  fontSize: 12.sp, fontWeight: FontWeight.w600, color: AppColors.muted,
+                  decoration: TextDecoration.lineThrough,
+                  decorationColor: AppColors.muted)),
+            ]),
+            SizedBox(height: 3.h),
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
+              decoration: BoxDecoration(color: AppColors.successSoft,
+                  borderRadius: BorderRadius.circular(5.r),
+                  border: Border.all(color: AppColors.success.withOpacity(0.3))),
+              child: Text(item.discountLabel, style: TextStyle(
+                  fontSize: 10.sp, fontWeight: FontWeight.w800, color: AppColors.success)),
+            ),
+          ] else
+            Text('₹${item.price.toStringAsFixed(0)}', style: TextStyle(
+                fontSize: 14.sp, fontWeight: FontWeight.w900, color: AppColors.primary)),
+        ])),
         SizedBox(width: 10.w),
         Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
           if (item.imageUrl != null && item.imageUrl!.isNotEmpty)
@@ -904,8 +779,7 @@ class _MenuCard extends StatelessWidget {
               child: Container(width: 72.w, height: 34.h,
                   decoration: BoxDecoration(color: AppColors.primary,
                       borderRadius: BorderRadius.circular(10.r)),
-                  child: Center(child: Row(
-                      mainAxisSize: MainAxisSize.min, children: [
+                  child: Center(child: Row(mainAxisSize: MainAxisSize.min, children: [
                     Icon(Icons.add_rounded, color: Colors.white, size: 16.sp),
                     SizedBox(width: 3.w),
                     Text('Add', style: TextStyle(fontSize: 12.sp,
@@ -914,31 +788,27 @@ class _MenuCard extends StatelessWidget {
               : Container(width: 100.w, height: 34.h,
               decoration: BoxDecoration(color: AppColors.primary,
                   borderRadius: BorderRadius.circular(10.r)),
-              child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    GestureDetector(onTap: onDecrease,
-                        child: SizedBox(width: 32.w, height: 34.h,
-                            child: const Icon(Icons.remove_rounded,
-                                color: Colors.white, size: 16))),
-                    Text('$qty', style: TextStyle(fontSize: 13.sp,
-                        fontWeight: FontWeight.w900, color: Colors.white)),
-                    GestureDetector(onTap: onIncrease,
-                        child: SizedBox(width: 32.w, height: 34.h,
-                            child: const Icon(Icons.add_rounded,
-                                color: Colors.white, size: 16))),
-                  ])),
+              child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                GestureDetector(onTap: onDecrease,
+                    child: SizedBox(width: 32.w, height: 34.h,
+                        child: const Icon(Icons.remove_rounded,
+                            color: Colors.white, size: 16))),
+                Text('$qty', style: TextStyle(fontSize: 13.sp,
+                    fontWeight: FontWeight.w900, color: Colors.white)),
+                GestureDetector(onTap: onIncrease,
+                    child: SizedBox(width: 32.w, height: 34.h,
+                        child: const Icon(Icons.add_rounded,
+                            color: Colors.white, size: 16))),
+              ])),
         ]),
       ]),
     );
   }
 }
 
-// ── Service row ───────────────────────────────────────────────────────────────
 class _ServiceRow extends StatelessWidget {
   final Restaurant restaurant;
   const _ServiceRow({required this.restaurant});
-
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<OrderTypeCubit, OrderType>(
@@ -955,24 +825,17 @@ class _ServiceRow extends StatelessWidget {
           Wrap(spacing: 8.w, runSpacing: 6.h, children: [
             if (r.dineInEnabled)
               _OrderTypeChip(icon: Icons.storefront_rounded, label: 'Dine-In',
-                  color: AppColors.primary,
-                  selected: currentType == OrderType.dineIn,
-                  onTap: () =>
-                      context.read<OrderTypeCubit>().set(OrderType.dineIn)),
+                  color: AppColors.primary, selected: currentType == OrderType.dineIn,
+                  onTap: () => context.read<OrderTypeCubit>().set(OrderType.dineIn)),
             if (r.takeawayEnabled)
               _OrderTypeChip(icon: Icons.shopping_bag_outlined, label: 'Takeaway',
-                  color: const Color(0xFF2E7D32),
-                  selected: currentType == OrderType.takeAway,
-                  onTap: () =>
-                      context.read<OrderTypeCubit>().set(OrderType.takeAway)),
+                  color: const Color(0xFF2E7D32), selected: currentType == OrderType.takeAway,
+                  onTap: () => context.read<OrderTypeCubit>().set(OrderType.takeAway)),
             if (r.tableBookingEnabled)
-              _OrderTypeChip(icon: Icons.event_seat_rounded,
-                  label: 'Table Booking',
+              _OrderTypeChip(icon: Icons.event_seat_rounded, label: 'Table Booking',
                   color: const Color(0xFF6A1B9A),
                   selected: currentType == OrderType.tableBooking,
-                  onTap: () => context
-                      .read<OrderTypeCubit>()
-                      .set(OrderType.tableBooking)),
+                  onTap: () => context.read<OrderTypeCubit>().set(OrderType.tableBooking)),
           ]),
           SizedBox(height: 8.h),
           Container(
@@ -991,7 +854,6 @@ class _ServiceRow extends StatelessWidget {
       },
     );
   }
-
   IconData _typeIcon(OrderType t) {
     switch (t) {
       case OrderType.dineIn:       return Icons.storefront_rounded;
@@ -999,7 +861,6 @@ class _ServiceRow extends StatelessWidget {
       case OrderType.tableBooking: return Icons.event_seat_rounded;
     }
   }
-
   String _typeLabel(OrderType t) {
     switch (t) {
       case OrderType.dineIn:       return 'Dine-In — sit and enjoy your meal';
@@ -1014,7 +875,6 @@ class _OrderTypeChip extends StatelessWidget {
   final bool selected; final VoidCallback onTap;
   const _OrderTypeChip({required this.icon, required this.label,
     required this.color, required this.selected, required this.onTap});
-
   @override
   Widget build(BuildContext context) => GestureDetector(
     onTap: onTap,
@@ -1022,12 +882,10 @@ class _OrderTypeChip extends StatelessWidget {
       duration: const Duration(milliseconds: 180),
       padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 7.h),
       decoration: BoxDecoration(
-        color: selected
-            ? color.withOpacity(0.12) : Colors.black.withOpacity(0.04),
+        color: selected ? color.withOpacity(0.12) : Colors.black.withOpacity(0.04),
         borderRadius: BorderRadius.circular(10.r),
         border: Border.all(
-            color: selected
-                ? color.withOpacity(0.5) : Colors.black.withOpacity(0.08),
+            color: selected ? color.withOpacity(0.5) : Colors.black.withOpacity(0.08),
             width: selected ? 1.5 : 1),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -1040,19 +898,15 @@ class _OrderTypeChip extends StatelessWidget {
   );
 }
 
-// ── Small widgets ─────────────────────────────────────────────────────────────
 class _CoverPlaceholder extends StatelessWidget {
   @override
-  Widget build(_) => Container(
-      color: const Color(0xFFEFEFEF),
-      child: const Center(
-          child: Icon(Icons.restaurant, size: 64, color: Colors.black26)));
+  Widget build(_) => Container(color: const Color(0xFFEFEFEF),
+      child: const Center(child: Icon(Icons.restaurant, size: 64, color: Colors.black26)));
 }
 
 class _ItemPlaceholder extends StatelessWidget {
   @override
-  Widget build(_) => ClipRRect(
-      borderRadius: BorderRadius.circular(12),
+  Widget build(_) => ClipRRect(borderRadius: BorderRadius.circular(12),
       child: Container(color: const Color(0xFFEFEFEF),
           child: const Icon(Icons.fastfood, size: 28, color: Colors.black38)));
 }
@@ -1060,7 +914,6 @@ class _ItemPlaceholder extends StatelessWidget {
 class _CircleIcon extends StatelessWidget {
   final IconData icon; final VoidCallback onTap;
   const _CircleIcon({required this.icon, required this.onTap});
-
   @override
   Widget build(BuildContext context) => GestureDetector(
     onTap: onTap,
@@ -1078,17 +931,14 @@ class _CircleIcon extends StatelessWidget {
 class _InfoChip extends StatelessWidget {
   final IconData icon; final String text;
   const _InfoChip({required this.icon, required this.text});
-
   @override
   Widget build(BuildContext context) => Container(
     padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 8.h),
-    decoration: BoxDecoration(
-        color: AppColors.soft, borderRadius: BorderRadius.circular(999)),
+    decoration: BoxDecoration(color: AppColors.soft, borderRadius: BorderRadius.circular(999)),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
       Icon(icon, size: 16.sp, color: AppColors.primary),
       SizedBox(width: 6.w),
-      Text(text, style: TextStyle(
-          fontSize: 12.sp, fontWeight: FontWeight.w800)),
+      Text(text, style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.w800)),
     ]),
   );
 }
