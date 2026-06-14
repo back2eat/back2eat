@@ -25,27 +25,29 @@ const int    _maxRedeemPercent  = 20;
 
 // ── Time slots: current time +30min buffer, next 23 hours, 15min intervals ────
 List<String> _buildTimeSlots() {
-  final now     = DateTime.now();
-  final buffer  = now.add(const Duration(minutes: 30));
-  var m         = ((buffer.minute / 15).ceil() * 15) % 60;
-  var h         = buffer.minute >= 45 ? buffer.hour + 1 : buffer.hour;
-  final end     = now.add(const Duration(hours: 23));
-  final endH    = end.hour;
-  final endMins = end.minute;
+  final now        = DateTime.now();
+  // Start: now + 30 min, rounded up to next 15-min mark
+  final startTime  = now.add(const Duration(minutes: 30));
+  var   startMins  = startTime.hour * 60 + startTime.minute;
+  // Round up to next 15
+  startMins = ((startMins / 15).ceil() * 15);
+
+  // End: now + 23 hours (in total minutes from midnight, may exceed 1440)
+  final endTime    = now.add(const Duration(hours: 23));
+  var   endMins    = endTime.hour * 60 + endTime.minute;
+  if (endTime.day != now.day) endMins += 1440; // next day
 
   final slots = <String>[];
-  int count = 0;
-  while (count < 100) {
-    final displayH = h % 24;
-    if (displayH > endH || (displayH == endH && m > endMins)) break;
-    final h12    = displayH == 0 ? 12 : (displayH > 12 ? displayH - 12 : displayH);
-    final ampm   = displayH >= 12 ? 'PM' : 'AM';
+
+  for (var mins = startMins; mins <= endMins && slots.length < 96; mins += 15) {
+    final h24    = (mins ~/ 60) % 24;
+    final m      = mins % 60;
+    final h12    = h24 == 0 ? 12 : (h24 > 12 ? h24 - 12 : h24);
+    final ampm   = h24 >= 12 ? 'PM' : 'AM';
     final minStr = m.toString().padLeft(2, '0');
     slots.add('${h12.toString().padLeft(2, '0')}:$minStr $ampm');
-    m += 15;
-    if (m >= 60) { m = 0; h++; }
-    count++;
   }
+
   return slots;
 }
 
