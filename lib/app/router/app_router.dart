@@ -27,7 +27,6 @@ import '../../features/reviews/presentation/pages/submit_review_page.dart';
 import '../../shared/services/notification_service.dart';
 
 class AppRouter {
-  // Create nav key independently — do NOT read NotificationService here
   static final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
 
   static final GoRouter router = GoRouter(
@@ -70,34 +69,17 @@ class AppRouter {
           );
         },
       ),
-      GoRoute(
-        path: '/cart',
-        builder: (_, state) {
-          final extra = state.extra as Map<String, dynamic>?;
-          return CartPage(
-            closeTime: extra?['closeTime'] as String?,
-          );
-        },
-      ),      GoRoute(
-        path: '/checkout',
-        builder: (_, state) {
-          final extra = state.extra as Map<String, dynamic>?;
-          return CheckoutPage(
-            closeTime: extra?['closeTime'] as String?,
-          );
-        },
-      ),      GoRoute(path: '/profile',  builder: (_, __) => const ProfilePage()),
+      GoRoute(path: '/cart',     builder: (_, __) => const CartPage()),
+      GoRoute(path: '/checkout', builder: (_, __) => const CheckoutPage()),
+      GoRoute(path: '/profile',  builder: (_, __) => const ProfilePage()),
       GoRoute(
         path: '/order-tracking',
         builder: (_, state) =>
             OrderTrackingPage(orderId: state.extra as String?),
       ),
-      GoRoute(
-        path: '/order-history',
-        builder: (_, __) => const OrderHistoryPage(),
-      ),
-      GoRoute(path: '/bookings', builder: (_, __) => const BookingsPage()),
-      GoRoute(path: '/points',   builder: (_, __) => const PointsPage()),
+      GoRoute(path: '/order-history', builder: (_, __) => const OrderHistoryPage()),
+      GoRoute(path: '/bookings',      builder: (_, __) => const BookingsPage()),
+      GoRoute(path: '/points',        builder: (_, __) => const PointsPage()),
       GoRoute(
         path: '/review',
         builder: (_, state) {
@@ -130,15 +112,14 @@ class AppRouter {
             ),
           );
         },
-      ),    ],
+      ),
+    ],
   );
 }
 
-/// Keeps NotificationService.navigatorKey in sync after router builds
 class _NotifNavObserver extends NavigatorObserver {
   @override
   void didPush(Route route, Route? previousRoute) {
-    NotificationService.instance.navigatorKey =
-        AppRouter._navKey;
+    NotificationService.instance.navigatorKey = AppRouter._navKey;
   }
 }

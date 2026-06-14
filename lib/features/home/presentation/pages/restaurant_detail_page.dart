@@ -1,7 +1,5 @@
 // 📱 CUSTOMER APP
 // lib/features/home/presentation/pages/restaurant_detail_page.dart
-// CHANGE: Removed _OpeningHoursCard widget and its section
-// CHANGE: Added closeTime getter exposed via state for cart/checkout to use
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -205,61 +203,8 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
     );
   }
 
-  // ── Branch-aware open status ───────────────────────────────────────────────
-  _OpenInfo _computeBranchOpenStatus(RestaurantDetailLoaded state) {
-    if (!state.branchIsOpen) {
-      return _OpenInfo(false, 'This outlet is currently closed');
-    }
-    final openMins  = _parseTime(state.branchOpenTime);
-    final closeMins = _parseTime(state.branchCloseTime);
-    if (openMins != null && closeMins != null) {
-      final now     = DateTime.now();
-      final nowMins = now.hour * 60 + now.minute;
-      if (nowMins < openMins) {
-        return _OpenInfo(false, 'Opens at ${_fmtMins(openMins)}');
-      }
-      if (nowMins >= closeMins) {
-        return _OpenInfo(false, 'Closed — reopens at ${_fmtMins(openMins)} tomorrow');
-      }
-      return _OpenInfo(true, 'Closes at ${_fmtMins(closeMins)}');
-    }
-    return _computeRestaurantOpenStatus(state.restaurant);
-  }
-
-  // ── Get today's close time from restaurant openingHours ───────────────────
-  String? _getTodayCloseTime(Restaurant r) {
-    final hours = r.openingHours;
-    if (hours == null || hours.isEmpty) return null;
-    final days   = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
-    final dayStr = days[DateTime.now().weekday - 1];
-    final today  = hours.cast<Map<String, dynamic>>()
-        .where((h) => h['day'] == dayStr)
-        .firstOrNull;
-    if (today == null || today['isClosed'] == true) return null;
-    return today['close'] as String?;
-  }
-
-  _OpenInfo _computeRestaurantOpenStatus(Restaurant r) {
-    if (!r.isOpen) return _OpenInfo(false, 'Restaurant is currently closed');
-    final hours = r.openingHours;
-    if (hours == null || hours.isEmpty) return _OpenInfo(true, null);
-    final now    = DateTime.now();
-    final days   = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
-    final dayStr = days[now.weekday - 1];
-    final matches = hours.cast<Map<String, dynamic>>()
-        .where((h) => h['day'] == dayStr);
-    if (matches.isEmpty) return _OpenInfo(true, null);
-    final todayH = matches.first;
-    if (todayH['isClosed'] == true) return _OpenInfo(false, 'Closed today');
-    final openMins  = _parseTime(todayH['open']  as String?);
-    final closeMins = _parseTime(todayH['close'] as String?);
-    if (openMins == null || closeMins == null) return _OpenInfo(true, null);
-    final nowMins = now.hour * 60 + now.minute;
-    if (nowMins < openMins)   return _OpenInfo(false, 'Opens at ${todayH["open"]}');
-    if (nowMins >= closeMins) return _OpenInfo(false, 'Closed — reopens tomorrow');
-    return _OpenInfo(true, 'Closes at ${todayH["close"]}');
-  }
-
+  // ── Time parsing ──────────────────────────────────────────────────────────
+  // Returns raw minutes since midnight (0–1439)
   int? _parseTime(String? s) {
     if (s == null) return null;
     final t   = s.trim().toUpperCase();
@@ -278,12 +223,99 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
     return null;
   }
 
+  // For past-midnight close times (0–5 AM = 0–300 mins), add 1440 so
+  // evening hours (e.g. 20:00 = 1200) compare correctly against them.
+  // But if it's currently past midnight (hour 0–5), compare raw directly.
+  bool _isPastClose(int nowMins, int rawClose) {
+    final now = DateTime.now();
+    final isPastMidnight = now.hour >= 0 && now.hour <= 5;
+    final isLateNightClose = rawClose <= 300; // 0–5 AM
+
+    if (isLateNightClose) {
+      if (isPastMidnight) {
+        // It's 2 AM, close is at 3 AM (180 mins) → not past close yet
+        return nowMins >= rawClose;
+      } else {
+        // It's 10 PM, close is at 2 AM (120 mins) → not past close
+        // Use effective close (add 1440) so 1200 < 1560 → open
+        return nowMins >= (rawClose + 1440);
+      }
+    }
+    // Normal same-day close
+    return nowMins >= rawClose;
+  }
+
   String _fmtMins(int mins) {
     final h    = mins ~/ 60;
     final m    = mins % 60;
     final h12  = h == 0 ? 12 : (h > 12 ? h - 12 : h);
     final ampm = h >= 12 ? 'PM' : 'AM';
     return '${h12.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')} $ampm';
+  }
+
+  // ── Branch-aware open status ───────────────────────────────────────────────
+  _OpenInfo _computeBranchOpenStatus(RestaurantDetailLoaded state) {
+    if (!state.branchIsOpen) {
+      return _OpenInfo(false, 'This outlet is currently closed');
+    }
+
+    final rawOpen  = _parseTime(state.branchOpenTime);
+    final rawClose = _parseTime(state.branchCloseTime);
+
+    if (rawOpen != null && rawClose != null) {
+      final now     = DateTime.now();
+      final nowMins = now.hour * 60 + now.minute;
+
+      // Before opening time
+      if (nowMins < rawOpen) {
+        return _OpenInfo(false, 'Opens at ${_fmtMins(rawOpen)}');
+      }
+      // Past closing time
+      if (_isPastClose(nowMins, rawClose)) {
+        return _OpenInfo(false, 'Closed — reopens at ${_fmtMins(rawOpen)} tomorrow');
+      }
+      return _OpenInfo(true, 'Closes at ${_fmtMins(rawClose)}');
+    }
+
+    return _computeRestaurantOpenStatus(state.restaurant);
+  }
+
+  // ── Get today's close time ────────────────────────────────────────────────
+  String? _getTodayCloseTime(Restaurant r) {
+    final hours = r.openingHours;
+    if (hours == null || hours.isEmpty) return null;
+    final days   = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+    final dayStr = days[DateTime.now().weekday - 1];
+    final today  = hours.cast<Map<String, dynamic>>()
+        .where((h) => h['day'] == dayStr)
+        .firstOrNull;
+    if (today == null || today['isClosed'] == true) return null;
+    return today['close'] as String?;
+  }
+
+  // ── Restaurant-level schedule fallback ────────────────────────────────────
+  _OpenInfo _computeRestaurantOpenStatus(Restaurant r) {
+    if (!r.isOpen) return _OpenInfo(false, 'Restaurant is currently closed');
+    final hours = r.openingHours;
+    if (hours == null || hours.isEmpty) return _OpenInfo(true, null);
+
+    final now    = DateTime.now();
+    final days   = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+    final dayStr = days[now.weekday - 1];
+    final matches = hours.cast<Map<String, dynamic>>()
+        .where((h) => h['day'] == dayStr);
+    if (matches.isEmpty) return _OpenInfo(true, null);
+    final todayH = matches.first;
+    if (todayH['isClosed'] == true) return _OpenInfo(false, 'Closed today');
+
+    final rawOpen  = _parseTime(todayH['open']  as String?);
+    final rawClose = _parseTime(todayH['close'] as String?);
+    if (rawOpen == null || rawClose == null) return _OpenInfo(true, null);
+
+    final nowMins = now.hour * 60 + now.minute;
+    if (nowMins < rawOpen) return _OpenInfo(false, 'Opens at ${todayH["open"]}');
+    if (_isPastClose(nowMins, rawClose)) return _OpenInfo(false, 'Closed — reopens tomorrow');
+    return _OpenInfo(true, 'Closes at ${todayH["close"]}');
   }
 
   @override
@@ -315,7 +347,6 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
             final cats     = filtered.keys.toList();
             final openInfo = _computeBranchOpenStatus(state);
 
-            // Get today's close time to pass to checkout
             final todayCloseTime = state.branchCloseTime?.isNotEmpty == true
                 ? state.branchCloseTime
                 : _getTodayCloseTime(r);
@@ -325,7 +356,6 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                 controller: _scrollCtrl,
                 slivers: [
 
-                  // Cover
                   SliverToBoxAdapter(child: _CoverSection(
                     restaurant: r,
                     onBack: () {
@@ -336,7 +366,6 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                   )),
                   SliverToBoxAdapter(child: SizedBox(height: 14.h)),
 
-                  // Restaurant info
                   SliverToBoxAdapter(child: Padding(
                     padding: EdgeInsets.symmetric(horizontal: 16.w),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -350,18 +379,15 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                             text: _distanceLabel(r.distanceKm, r.city)),
                         _InfoChip(icon: Icons.timer_outlined,
                             text: 'Ready in ${r.prepTimeMins} min'),
-                        // Show close time chip if available
                         if (todayCloseTime != null && openInfo.isOpen)
                           _InfoChip(icon: Icons.access_time_rounded,
                               text: 'Closes at $todayCloseTime'),
                       ]),
                       SizedBox(height: 10.h),
 
-                      // Open/Closed badge
                       _OpenStatusRow(openInfo: openInfo),
                       SizedBox(height: 10.h),
 
-                      // Closed banner
                       if (!openInfo.isOpen) ...[
                         Container(
                           width: double.infinity,
@@ -369,26 +395,21 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                           decoration: BoxDecoration(
                             color: AppColors.dangerSoft,
                             borderRadius: BorderRadius.circular(12.r),
-                            border: Border.all(
-                                color: AppColors.danger.withOpacity(0.3)),
+                            border: Border.all(color: AppColors.danger.withOpacity(0.3)),
                           ),
                           child: Row(children: [
-                            Icon(Icons.store_outlined,
-                                color: AppColors.danger, size: 18.sp),
+                            Icon(Icons.store_outlined, color: AppColors.danger, size: 18.sp),
                             SizedBox(width: 8.w),
                             Expanded(child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Currently Closed',
-                                      style: TextStyle(fontSize: 13.sp,
-                                          fontWeight: FontWeight.w900,
-                                          color: AppColors.danger)),
-                                  if (openInfo.reason != null)
-                                    Text(openInfo.reason!,
-                                        style: TextStyle(fontSize: 11.sp,
-                                            color: AppColors.danger,
-                                            fontWeight: FontWeight.w600)),
-                                ])),
+                                crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text('Currently Closed',
+                                  style: TextStyle(fontSize: 13.sp,
+                                      fontWeight: FontWeight.w900, color: AppColors.danger)),
+                              if (openInfo.reason != null)
+                                Text(openInfo.reason!,
+                                    style: TextStyle(fontSize: 11.sp,
+                                        color: AppColors.danger, fontWeight: FontWeight.w600)),
+                            ])),
                           ]),
                         ),
                         SizedBox(height: 10.h),
@@ -399,10 +420,6 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                   )),
                   SliverToBoxAdapter(child: SizedBox(height: 16.h)),
 
-                  // ── Opening hours card REMOVED ─────────────────────────
-                  // Close time is shown in the info chips above instead
-
-                  // Search bar
                   SliverToBoxAdapter(child: Padding(
                     padding: EdgeInsets.symmetric(horizontal: 16.w),
                     child: TextField(
@@ -422,8 +439,7 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                             child: Icon(Icons.close_rounded,
                                 color: AppColors.muted, size: 18.sp))
                             : null,
-                        filled: true,
-                        fillColor: AppColors.soft,
+                        filled: true, fillColor: AppColors.soft,
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(14.r),
                             borderSide: BorderSide.none),
@@ -434,19 +450,15 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                   )),
                   SliverToBoxAdapter(child: SizedBox(height: 16.h)),
 
-                  // Menu items
                   if (filtered.isEmpty)
                     SliverToBoxAdapter(child: Padding(
                       padding: EdgeInsets.only(top: 40.h),
-                      child: Center(child: Column(
-                          mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.search_off_rounded,
-                            size: 40.sp, color: AppColors.muted),
+                      child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.search_off_rounded, size: 40.sp, color: AppColors.muted),
                         SizedBox(height: 10.h),
                         Text('No items found for "$_searchQuery"',
                             style: TextStyle(fontSize: 13.sp,
-                                color: AppColors.muted,
-                                fontWeight: FontWeight.w700)),
+                                color: AppColors.muted, fontWeight: FontWeight.w700)),
                       ])),
                     ))
                   else
@@ -522,7 +534,6 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                 ],
               ),
 
-              // Floating category picker
               if (_catOrder.isNotEmpty && _searchQuery.isEmpty)
                 Positioned(
                   right: 16.w, bottom: 90.h,
@@ -534,13 +545,11 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(99),
                         border: Border.all(color: AppColors.line),
-                        boxShadow: [BoxShadow(
-                            color: Colors.black.withOpacity(0.12),
+                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12),
                             blurRadius: 16, offset: const Offset(0, 4))],
                       ),
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.menu_book_rounded,
-                            size: 18.sp, color: AppColors.primary),
+                        Icon(Icons.menu_book_rounded, size: 18.sp, color: AppColors.primary),
                         SizedBox(width: 6.w),
                         Text('Menu', style: TextStyle(fontSize: 12.sp,
                             fontWeight: FontWeight.w900, color: AppColors.primary)),
@@ -549,7 +558,6 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                   ),
                 ),
 
-              // Cart button
               Positioned(
                 left: 16.w, right: 16.w, bottom: 16.h,
                 child: BlocBuilder<CartBloc, CartState>(
@@ -558,15 +566,12 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                     if (count == 0) {
                       return PrimaryButton(
                           text: 'Go to cart',
-                          onTap: () => context.push('/cart',
-                              extra: {'closeTime': todayCloseTime}));
+                          onTap: () => context.push('/cart'));
                     }
                     return GestureDetector(
-                      onTap: () => context.push('/cart',
-                          extra: {'closeTime': todayCloseTime}),
+                      onTap: () => context.push('/cart'),
                       child: Container(
-                        padding: EdgeInsets.symmetric(
-                            horizontal: 20.w, vertical: 14.h),
+                        padding: EdgeInsets.symmetric(horizontal: 20.w, vertical: 14.h),
                         decoration: BoxDecoration(
                           color: AppColors.primary,
                           borderRadius: BorderRadius.circular(16.r),
@@ -582,8 +587,7 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
                                 borderRadius: BorderRadius.circular(8.r)),
                             child: Center(child: Text('$count',
                                 style: TextStyle(fontSize: 12.sp,
-                                    fontWeight: FontWeight.w900,
-                                    color: Colors.white))),
+                                    fontWeight: FontWeight.w900, color: Colors.white))),
                           ),
                           SizedBox(width: 12.w),
                           Text('View Cart', style: TextStyle(fontSize: 15.sp,
@@ -608,8 +612,6 @@ class _RestaurantDetailPageState extends State<RestaurantDetailPage> {
     );
   }
 }
-
-// ── Models & small widgets (unchanged) ───────────────────────────────────────
 
 class _OpenInfo {
   final bool    isOpen;
@@ -653,8 +655,7 @@ class _CoverSection extends StatelessWidget {
   final Restaurant   restaurant;
   final VoidCallback onBack;
   final VoidCallback onCart;
-  const _CoverSection(
-      {required this.restaurant, required this.onBack, required this.onCart});
+  const _CoverSection({required this.restaurant, required this.onBack, required this.onCart});
   @override
   Widget build(BuildContext context) {
     final r = restaurant;
@@ -684,11 +685,8 @@ class _CoverSection extends StatelessWidget {
                 bottomRight: Radius.circular(28.r)),
             gradient: LinearGradient(
                 begin: Alignment.topCenter, end: Alignment.bottomCenter,
-                colors: [
-                  Colors.black.withOpacity(0.3),
-                  Colors.transparent,
-                  Colors.black.withOpacity(0.15),
-                ]),
+                colors: [Colors.black.withOpacity(0.3), Colors.transparent,
+                  Colors.black.withOpacity(0.15)]),
           )),
         Positioned(left: 16.w, top: 52.h,
             child: _CircleIcon(icon: Icons.arrow_back_ios_new_rounded, onTap: onBack)),
@@ -718,16 +716,12 @@ class _MenuCard extends StatelessWidget {
             blurRadius: 10, offset: const Offset(0, 3))],
       ),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Padding(
-          padding: EdgeInsets.only(top: 2.h),
-          child: Container(
-            width: 14.w, height: 14.w,
-            decoration: BoxDecoration(
-                border: Border.all(color: dotColor, width: 1.5),
-                borderRadius: BorderRadius.circular(2.r)),
-            child: Center(child: Container(width: 7.w, height: 7.w,
-                decoration: BoxDecoration(shape: BoxShape.circle, color: dotColor))),
-          ),
+        Padding(padding: EdgeInsets.only(top: 2.h),
+          child: Container(width: 14.w, height: 14.w,
+              decoration: BoxDecoration(border: Border.all(color: dotColor, width: 1.5),
+                  borderRadius: BorderRadius.circular(2.r)),
+              child: Center(child: Container(width: 7.w, height: 7.w,
+                  decoration: BoxDecoration(shape: BoxShape.circle, color: dotColor)))),
         ),
         SizedBox(width: 10.w),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -747,8 +741,7 @@ class _MenuCard extends StatelessWidget {
               SizedBox(width: 6.w),
               Text('₹${item.price.toStringAsFixed(0)}', style: TextStyle(
                   fontSize: 12.sp, fontWeight: FontWeight.w600, color: AppColors.muted,
-                  decoration: TextDecoration.lineThrough,
-                  decorationColor: AppColors.muted)),
+                  decoration: TextDecoration.lineThrough, decorationColor: AppColors.muted)),
             ]),
             SizedBox(height: 3.h),
             Container(
@@ -791,14 +784,12 @@ class _MenuCard extends StatelessWidget {
               child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
                 GestureDetector(onTap: onDecrease,
                     child: SizedBox(width: 32.w, height: 34.h,
-                        child: const Icon(Icons.remove_rounded,
-                            color: Colors.white, size: 16))),
+                        child: const Icon(Icons.remove_rounded, color: Colors.white, size: 16))),
                 Text('$qty', style: TextStyle(fontSize: 13.sp,
                     fontWeight: FontWeight.w900, color: Colors.white)),
                 GestureDetector(onTap: onIncrease,
                     child: SizedBox(width: 32.w, height: 34.h,
-                        child: const Icon(Icons.add_rounded,
-                            color: Colors.white, size: 16))),
+                        child: const Icon(Icons.add_rounded, color: Colors.white, size: 16))),
               ])),
         ]),
       ]),

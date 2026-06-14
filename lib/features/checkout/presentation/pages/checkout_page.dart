@@ -23,78 +23,45 @@ import '../../../orders/presentation/bloc/order_state.dart';
 const double _commissionPercent = 2.0;
 const int    _maxRedeemPercent  = 20;
 
-// ── Time slot builder — respects restaurant opening hours ─────────────────────
-// openTime / closeTime are strings like "09:00 AM" or "09:00" (24h)
-// If not provided, defaults to now+30min → 10:00 PM
-List<String> _buildTimeSlots({String? openTime, String? closeTime}) {
-  final now    = DateTime.now();
-  final buffer = now.add(const Duration(minutes: 30));
-
-  // Parse close hour/minute — default 22:00
-  int closeHour = 22, closeMins = 0;
-  if (closeTime != null && closeTime.isNotEmpty) {
-    final t = _parseTimeString(closeTime);
-    if (t != null) { closeHour = t[0]; closeMins = t[1]; }
-  }
-
-  // Start from buffer rounded to next 15 min
-  var m = ((buffer.minute / 15).ceil() * 15) % 60;
-  var h = buffer.minute >= 45 ? buffer.hour + 1 : buffer.hour;
+// ── Time slots: current time +30min buffer, next 23 hours, 15min intervals ────
+List<String> _buildTimeSlots() {
+  final now     = DateTime.now();
+  final buffer  = now.add(const Duration(minutes: 30));
+  var m         = ((buffer.minute / 15).ceil() * 15) % 60;
+  var h         = buffer.minute >= 45 ? buffer.hour + 1 : buffer.hour;
+  final end     = now.add(const Duration(hours: 23));
+  final endH    = end.hour;
+  final endMins = end.minute;
 
   final slots = <String>[];
-  while (h < closeHour || (h == closeHour && m <= closeMins)) {
-    if (h > closeHour || (h == closeHour && m > closeMins)) break;
-    final h12    = h == 0 ? 12 : (h > 12 ? h - 12 : h);
-    final ampm   = h >= 12 ? 'PM' : 'AM';
+  int count = 0;
+  while (count < 100) {
+    final displayH = h % 24;
+    if (displayH > endH || (displayH == endH && m > endMins)) break;
+    final h12    = displayH == 0 ? 12 : (displayH > 12 ? displayH - 12 : displayH);
+    final ampm   = displayH >= 12 ? 'PM' : 'AM';
     final minStr = m.toString().padLeft(2, '0');
     slots.add('${h12.toString().padLeft(2, '0')}:$minStr $ampm');
     m += 15;
     if (m >= 60) { m = 0; h++; }
+    count++;
   }
   return slots;
 }
 
-// Parse "09:00 AM" or "09:00" → [hour24, minute]
-List<int>? _parseTimeString(String t) {
-  final s   = t.trim().toUpperCase();
-  final m12 = RegExp(r'^(\d{1,2}):(\d{2})\s*(AM|PM)$').firstMatch(s);
-  if (m12 != null) {
-    var h = int.parse(m12.group(1)!);
-    final m = int.parse(m12.group(2)!);
-    if (m12.group(3) == 'PM' && h != 12) h += 12;
-    if (m12.group(3) == 'AM' && h == 12) h = 0;
-    return [h, m];
-  }
-  final m24 = RegExp(r'^(\d{1,2}):(\d{2})$').firstMatch(s);
-  if (m24 != null) {
-    return [int.parse(m24.group(1)!), int.parse(m24.group(2)!)];
-  }
-  return null;
-}
-
-// ── CheckoutPage — accepts optional restaurant hours ──────────────────────────
 class CheckoutPage extends StatelessWidget {
-  /// Today's open time from restaurant openingHours e.g. "09:00 AM"
-  final String? openTime;
-  /// Today's close time from restaurant openingHours e.g. "10:00 PM"
-  final String? closeTime;
-
-  const CheckoutPage({super.key, this.openTime, this.closeTime});
-
+  const CheckoutPage({super.key});
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
       create: (_) => getIt<OrderBloc>(),
-      child: _CheckoutView(openTime: openTime, closeTime: closeTime),
+      child: const _CheckoutView(),
     );
   }
 }
 
 class _CheckoutView extends StatefulWidget {
-  final String? openTime;
-  final String? closeTime;
-  const _CheckoutView({this.openTime, this.closeTime});
-
+  const _CheckoutView();
   @override
   State<_CheckoutView> createState() => _CheckoutViewState();
 }
@@ -127,11 +94,7 @@ class _CheckoutViewState extends State<_CheckoutView> {
   @override
   void initState() {
     super.initState();
-    // Use restaurant hours if provided — otherwise fallback to 10 PM default
-    _timeSlots = _buildTimeSlots(
-      openTime:  widget.openTime,
-      closeTime: widget.closeTime,
-    );
+    _timeSlots = _buildTimeSlots();
     _loadPoints();
     _razorpay = Razorpay();
     _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
@@ -369,13 +332,6 @@ class _CheckoutViewState extends State<_CheckoutView> {
 
                               SizedBox(height: 12.h),
                               _SectionTitle(title: 'Select Time Slot'),
-                              // Show close time hint if restaurant hours are known
-                              if (widget.closeTime != null) ...[
-                                SizedBox(height: 4.h),
-                                Text('Restaurant closes at ${widget.closeTime}',
-                                    style: TextStyle(fontSize: 11.sp,
-                                        color: AppColors.muted, fontWeight: FontWeight.w600)),
-                              ],
                               SizedBox(height: 10.h),
                               _Card(child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -384,7 +340,7 @@ class _CheckoutViewState extends State<_CheckoutView> {
                                         color: AppColors.muted, fontWeight: FontWeight.w700)),
                                 SizedBox(height: 12.h),
                                 _timeSlots.isEmpty
-                                    ? Text('No available slots for today',
+                                    ? Text('No available slots',
                                     style: TextStyle(fontSize: 12.sp,
                                         color: AppColors.danger, fontWeight: FontWeight.w700))
                                     : SizedBox(
@@ -441,41 +397,32 @@ class _CheckoutViewState extends State<_CheckoutView> {
                                   SizedBox(height: 14.h),
                                   Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                                     GestureDetector(
-                                      onTap: () {
-                                        if (_guestCount > 1) setState(() => _guestCount--);
-                                      },
+                                      onTap: () { if (_guestCount > 1) setState(() => _guestCount--); },
                                       child: Container(
                                         width: 40.w, height: 40.w,
                                         decoration: BoxDecoration(
-                                          color: _guestCount > 1
-                                              ? AppColors.primary : AppColors.soft,
+                                          color: _guestCount > 1 ? AppColors.primary : AppColors.soft,
                                           borderRadius: BorderRadius.circular(12.r),
                                         ),
                                         child: Icon(Icons.remove,
-                                            color: _guestCount > 1
-                                                ? Colors.white : AppColors.muted,
+                                            color: _guestCount > 1 ? Colors.white : AppColors.muted,
                                             size: 20.sp),
                                       ),
                                     ),
                                     SizedBox(width: 24.w),
                                     Column(children: [
                                       Text('$_guestCount',
-                                          style: TextStyle(fontSize: 28.sp,
-                                              fontWeight: FontWeight.w900)),
+                                          style: TextStyle(fontSize: 28.sp, fontWeight: FontWeight.w900)),
                                       Text(_guestCount == 1 ? 'person' : 'people',
                                           style: TextStyle(fontSize: 12.sp,
-                                              color: AppColors.muted,
-                                              fontWeight: FontWeight.w600)),
+                                              color: AppColors.muted, fontWeight: FontWeight.w600)),
                                     ]),
                                     SizedBox(width: 24.w),
                                     GestureDetector(
-                                      onTap: () {
-                                        if (_guestCount < 20) setState(() => _guestCount++);
-                                      },
+                                      onTap: () { if (_guestCount < 20) setState(() => _guestCount++); },
                                       child: Container(
                                         width: 40.w, height: 40.w,
-                                        decoration: BoxDecoration(
-                                            color: AppColors.primary,
+                                        decoration: BoxDecoration(color: AppColors.primary,
                                             borderRadius: BorderRadius.circular(12.r)),
                                         child: Icon(Icons.add, color: Colors.white, size: 20.sp),
                                       ),
@@ -546,8 +493,7 @@ class _CheckoutViewState extends State<_CheckoutView> {
                                           : () => _applyCoupon(subtotal, orderTypeStr, restaurantId),
                                       child: AnimatedContainer(
                                         duration: const Duration(milliseconds: 150),
-                                        padding: EdgeInsets.symmetric(
-                                            horizontal: 16.w, vertical: 13.h),
+                                        padding: EdgeInsets.symmetric(horizontal: 16.w, vertical: 13.h),
                                         decoration: BoxDecoration(color: AppColors.primary,
                                             borderRadius: BorderRadius.circular(12.r)),
                                         child: _applyingCoupon
@@ -556,21 +502,18 @@ class _CheckoutViewState extends State<_CheckoutView> {
                                                 color: Colors.white, strokeWidth: 2))
                                             : Text('Apply',
                                             style: TextStyle(fontSize: 13.sp,
-                                                fontWeight: FontWeight.w900,
-                                                color: Colors.white)),
+                                                fontWeight: FontWeight.w900, color: Colors.white)),
                                       ),
                                     ),
                                   ]),
                                   if (_couponError != null) ...[
                                     SizedBox(height: 8.h),
                                     Row(children: [
-                                      Icon(Icons.error_outline,
-                                          size: 13.sp, color: AppColors.danger),
+                                      Icon(Icons.error_outline, size: 13.sp, color: AppColors.danger),
                                       SizedBox(width: 4.w),
                                       Expanded(child: Text(_couponError!,
                                           style: TextStyle(fontSize: 11.sp,
-                                              color: AppColors.danger,
-                                              fontWeight: FontWeight.w700))),
+                                              color: AppColors.danger, fontWeight: FontWeight.w700))),
                                     ]),
                                   ],
                                 ],
@@ -586,16 +529,13 @@ class _CheckoutViewState extends State<_CheckoutView> {
                                     decoration: BoxDecoration(
                                         color: AppColors.primary.withOpacity(0.10),
                                         borderRadius: BorderRadius.circular(12.r)),
-                                    child: Icon(Icons.stars_rounded,
-                                        color: AppColors.primary, size: 20.sp),
+                                    child: Icon(Icons.stars_rounded, color: AppColors.primary, size: 20.sp),
                                   ),
                                   SizedBox(width: 12.w),
                                   Expanded(child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                    Text(
-                                      '$_pointsBalance pts  ·  ₹${(_pointsBalance * _pointsValuePerPt).toStringAsFixed(0)} value',
-                                      style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w900),
-                                    ),
+                                    Text('$_pointsBalance pts  ·  ₹${(_pointsBalance * _pointsValuePerPt).toStringAsFixed(0)} value',
+                                        style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w900)),
                                     Text(
                                       _usePoints
                                           ? 'Saving ₹${_pointsDiscount.toStringAsFixed(0)} on this order'
@@ -618,46 +558,39 @@ class _CheckoutViewState extends State<_CheckoutView> {
                                   const Icon(Icons.shopping_bag_outlined, color: AppColors.muted),
                                   SizedBox(width: 10.w),
                                   Expanded(child: Text('Your cart is empty',
-                                      style: TextStyle(fontSize: 13.sp,
-                                          fontWeight: FontWeight.w800))),
+                                      style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w800))),
                                   TextButton(
                                     onPressed: () => context.go('/home'),
                                     child: Text('Browse',
-                                        style: TextStyle(fontSize: 13.sp,
-                                            fontWeight: FontWeight.w900)),
+                                        style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w900)),
                                   ),
                                 ]))
                               else
                                 _Card(child: Column(children: [
                                   ...cart.items.map((e) => Padding(
                                     padding: EdgeInsets.only(bottom: 12.h),
-                                    child: Row(crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Container(
-                                            height: 38.h, width: 38.h,
-                                            decoration: BoxDecoration(
-                                                color: Colors.black.withOpacity(0.05),
-                                                borderRadius: BorderRadius.circular(12.r)),
-                                            child: const Icon(Icons.fastfood, color: Colors.black54),
-                                          ),
-                                          SizedBox(width: 10.w),
-                                          Expanded(child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                            Text(e.name, maxLines: 2,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: TextStyle(fontSize: 13.sp,
-                                                    fontWeight: FontWeight.w900)),
-                                            SizedBox(height: 4.h),
-                                            Text('Qty: ${e.qty}',
-                                                style: TextStyle(fontSize: 12.sp,
-                                                    color: AppColors.muted,
-                                                    fontWeight: FontWeight.w700)),
-                                          ])),
-                                          SizedBox(width: 8.w),
-                                          Text(currency.format(e.price * e.qty),
-                                              style: TextStyle(fontSize: 13.sp,
-                                                  fontWeight: FontWeight.w900)),
-                                        ]),
+                                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                      Container(
+                                        height: 38.h, width: 38.h,
+                                        decoration: BoxDecoration(
+                                            color: Colors.black.withOpacity(0.05),
+                                            borderRadius: BorderRadius.circular(12.r)),
+                                        child: const Icon(Icons.fastfood, color: Colors.black54),
+                                      ),
+                                      SizedBox(width: 10.w),
+                                      Expanded(child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                        Text(e.name, maxLines: 2, overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w900)),
+                                        SizedBox(height: 4.h),
+                                        Text('Qty: ${e.qty}',
+                                            style: TextStyle(fontSize: 12.sp,
+                                                color: AppColors.muted, fontWeight: FontWeight.w700)),
+                                      ])),
+                                      SizedBox(width: 8.w),
+                                      Text(currency.format(e.price * e.qty),
+                                          style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w900)),
+                                    ]),
                                   )),
                                   Container(height: 1, color: AppColors.line),
                                   SizedBox(height: 12.h),
@@ -669,52 +602,41 @@ class _CheckoutViewState extends State<_CheckoutView> {
                                     SizedBox(height: 6.h),
                                     Row(children: [
                                       Row(children: [
-                                        Icon(Icons.local_offer_rounded,
-                                            size: 13.sp, color: AppColors.success),
+                                        Icon(Icons.local_offer_rounded, size: 13.sp, color: AppColors.success),
                                         SizedBox(width: 4.w),
-                                        Text('Coupon discount',
-                                            style: TextStyle(fontSize: 13.sp,
-                                                fontWeight: FontWeight.w700,
-                                                color: AppColors.success)),
+                                        Text('Coupon discount', style: TextStyle(fontSize: 13.sp,
+                                            fontWeight: FontWeight.w700, color: AppColors.success)),
                                       ]),
                                       const Spacer(),
                                       Text('- ${currency.format(_discountAmount)}',
                                           style: TextStyle(fontSize: 13.sp,
-                                              fontWeight: FontWeight.w900,
-                                              color: AppColors.success)),
+                                              fontWeight: FontWeight.w900, color: AppColors.success)),
                                     ]),
                                   ],
                                   if (_pointsDiscount > 0) ...[
                                     SizedBox(height: 6.h),
                                     Row(children: [
                                       Row(children: [
-                                        Icon(Icons.stars_rounded,
-                                            size: 13.sp, color: AppColors.primary),
+                                        Icon(Icons.stars_rounded, size: 13.sp, color: AppColors.primary),
                                         SizedBox(width: 4.w),
-                                        Text('Points discount',
-                                            style: TextStyle(fontSize: 13.sp,
-                                                fontWeight: FontWeight.w700,
-                                                color: AppColors.primary)),
+                                        Text('Points discount', style: TextStyle(fontSize: 13.sp,
+                                            fontWeight: FontWeight.w700, color: AppColors.primary)),
                                       ]),
                                       const Spacer(),
                                       Text('- ${currency.format(_pointsDiscount)}',
                                           style: TextStyle(fontSize: 13.sp,
-                                              fontWeight: FontWeight.w900,
-                                              color: AppColors.primary)),
+                                              fontWeight: FontWeight.w900, color: AppColors.primary)),
                                     ]),
                                   ],
                                   SizedBox(height: 10.h),
                                   Container(height: 1, color: AppColors.line),
                                   SizedBox(height: 10.h),
                                   Row(children: [
-                                    Text('Total',
-                                        style: TextStyle(fontSize: 14.sp,
-                                            fontWeight: FontWeight.w900)),
+                                    Text('Total', style: TextStyle(fontSize: 14.sp, fontWeight: FontWeight.w900)),
                                     const Spacer(),
                                     Text(currency.format(total),
                                         style: TextStyle(fontSize: 18.sp,
-                                            fontWeight: FontWeight.w900,
-                                            color: AppColors.primary)),
+                                            fontWeight: FontWeight.w900, color: AppColors.primary)),
                                   ]),
                                 ])),
 
@@ -723,57 +645,42 @@ class _CheckoutViewState extends State<_CheckoutView> {
                           ),
                         ),
 
-                        // ── Sticky CTA ─────────────────────────────────────
                         Container(
                           padding: EdgeInsets.fromLTRB(16.w, 12.h, 16.w, 14.h),
                           decoration: BoxDecoration(
                             color: Colors.white,
-                            border: Border(top: BorderSide(
-                                color: Colors.black.withOpacity(0.06))),
+                            border: Border(top: BorderSide(color: Colors.black.withOpacity(0.06))),
                           ),
                           child: Column(mainAxisSize: MainAxisSize.min, children: [
                             Row(children: [
                               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Text('Payable',
-                                    style: TextStyle(fontSize: 12.sp,
-                                        fontWeight: FontWeight.w800,
-                                        color: AppColors.muted)),
+                                Text('Payable', style: TextStyle(fontSize: 12.sp,
+                                    fontWeight: FontWeight.w800, color: AppColors.muted)),
                                 if (_totalSavings > 0)
                                   Text('You saved ₹${_totalSavings.toStringAsFixed(0)}!',
                                       style: TextStyle(fontSize: 10.sp,
-                                          fontWeight: FontWeight.w800,
-                                          color: AppColors.success)),
+                                          fontWeight: FontWeight.w800, color: AppColors.success)),
                               ]),
                               const Spacer(),
                               Text(currency.format(total),
-                                  style: TextStyle(fontSize: 17.sp,
-                                      fontWeight: FontWeight.w900)),
+                                  style: TextStyle(fontSize: 17.sp, fontWeight: FontWeight.w900)),
                             ]),
                             if (needsTimeSlot) ...[
                               SizedBox(height: 6.h),
                               Text('Please select a time slot above',
                                   style: TextStyle(fontSize: 11.sp,
-                                      color: AppColors.danger,
-                                      fontWeight: FontWeight.w700)),
+                                      color: AppColors.danger, fontWeight: FontWeight.w700)),
                             ],
                             SizedBox(height: 10.h),
                             Opacity(
                               opacity: (isEmpty || isLoading || needsTimeSlot) ? 0.6 : 1,
                               child: PrimaryButton(
-                                text: isLoading
-                                    ? 'Processing...'
-                                    : isEmpty
-                                    ? 'Cart Empty'
-                                    : 'Pay ₹${total.toStringAsFixed(0)}',
+                                text: isLoading ? 'Processing...' : isEmpty ? 'Cart Empty' : 'Pay ₹${total.toStringAsFixed(0)}',
                                 onTap: () {
-                                  if (isEmpty || isLoading || needsTimeSlot ||
-                                      _isSubmitting) return;
-                                  _initiatePayment(
-                                    context, cart, effectiveType,
-                                    subtotal, commission, total,
-                                    needsGuests ? _guestCount : null,
-                                    _pointsToRedeem,
-                                  );
+                                  if (isEmpty || isLoading || needsTimeSlot || _isSubmitting) return;
+                                  _initiatePayment(context, cart, effectiveType,
+                                      subtotal, commission, total,
+                                      needsGuests ? _guestCount : null, _pointsToRedeem);
                                 },
                               ),
                             ),
@@ -817,8 +724,7 @@ class _CheckoutViewState extends State<_CheckoutView> {
 
   void _showOrderTypeSheet(BuildContext context, OrderType current) {
     final cubit   = context.read<OrderTypeCubit>();
-    final allowed = cubit.allowedTypes
-        .where((t) => t != OrderType.tableBooking).toList();
+    final allowed = cubit.allowedTypes.where((t) => t != OrderType.tableBooking).toList();
     showModalBottomSheet(
       context: context, backgroundColor: Colors.transparent,
       builder: (_) => Container(
@@ -827,33 +733,24 @@ class _CheckoutViewState extends State<_CheckoutView> {
             borderRadius: BorderRadius.vertical(top: Radius.circular(24.r))),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(width: 44.w, height: 5.h,
-              decoration: BoxDecoration(color: AppColors.line,
-                  borderRadius: BorderRadius.circular(999))),
+              decoration: BoxDecoration(color: AppColors.line, borderRadius: BorderRadius.circular(999))),
           SizedBox(height: 14.h),
-          Text('Select Order Type',
-              style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.w900)),
+          Text('Select Order Type', style: TextStyle(fontSize: 16.sp, fontWeight: FontWeight.w900)),
           SizedBox(height: 14.h),
           Row(children: [
             if (allowed.contains(OrderType.dineIn)) ...[
               Expanded(child: _BubbleChoice(
-                title: 'Dine-In', subtitle: 'Eat at restaurant',
-                icon: Icons.storefront, selected: current == OrderType.dineIn,
-                onTap: () {
-                  context.read<OrderTypeCubit>().set(OrderType.dineIn);
-                  Navigator.pop(context);
-                },
+                title: 'Dine-In', subtitle: 'Eat at restaurant', icon: Icons.storefront,
+                selected: current == OrderType.dineIn,
+                onTap: () { context.read<OrderTypeCubit>().set(OrderType.dineIn); Navigator.pop(context); },
               )),
               SizedBox(width: 10.w),
             ],
             if (allowed.contains(OrderType.takeAway))
               Expanded(child: _BubbleChoice(
-                title: 'Take-Away', subtitle: 'Pickup at counter',
-                icon: Icons.shopping_bag_outlined,
+                title: 'Take-Away', subtitle: 'Pickup at counter', icon: Icons.shopping_bag_outlined,
                 selected: current == OrderType.takeAway,
-                onTap: () {
-                  context.read<OrderTypeCubit>().set(OrderType.takeAway);
-                  Navigator.pop(context);
-                },
+                onTap: () { context.read<OrderTypeCubit>().set(OrderType.takeAway); Navigator.pop(context); },
               )),
           ]),
         ]),
@@ -862,20 +759,15 @@ class _CheckoutViewState extends State<_CheckoutView> {
   }
 }
 
-// ── Supporting widgets ────────────────────────────────────────────────────────
-
 class _BillRow extends StatelessWidget {
   final String label; final double value;
   final NumberFormat currency; final Color? labelColor;
-  const _BillRow({required this.label, required this.value,
-    required this.currency, this.labelColor});
+  const _BillRow({required this.label, required this.value, required this.currency, this.labelColor});
   @override
   Widget build(BuildContext context) => Row(children: [
-    Text(label, style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w700,
-        color: labelColor ?? AppColors.text)),
+    Text(label, style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w700, color: labelColor ?? AppColors.text)),
     const Spacer(),
-    Text(currency.format(value),
-        style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w900)),
+    Text(currency.format(value), style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w900)),
   ]);
 }
 
@@ -885,8 +777,7 @@ class _SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: EdgeInsets.only(left: 2.w),
-    child: Text(title, style: TextStyle(fontSize: 13.sp,
-        fontWeight: FontWeight.w900, color: Colors.black87)),
+    child: Text(title, style: TextStyle(fontSize: 13.sp, fontWeight: FontWeight.w900, color: Colors.black87)),
   );
 }
 
@@ -898,10 +789,8 @@ class _PillButton extends StatelessWidget {
     onTap: onTap,
     child: Container(
       padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
-      decoration: BoxDecoration(color: Colors.black.withOpacity(0.06),
-          borderRadius: BorderRadius.circular(999)),
-      child: Text(text, style: TextStyle(fontSize: 12.sp,
-          fontWeight: FontWeight.w900, color: Colors.black87)),
+      decoration: BoxDecoration(color: Colors.black.withOpacity(0.06), borderRadius: BorderRadius.circular(999)),
+      child: Text(text, style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.w900, color: Colors.black87)),
     ),
   );
 }
@@ -909,38 +798,29 @@ class _PillButton extends StatelessWidget {
 class _BubbleChoice extends StatelessWidget {
   const _BubbleChoice({required this.title, required this.subtitle,
     required this.icon, required this.selected, required this.onTap});
-  final String title, subtitle;
-  final IconData icon; final bool selected; final VoidCallback onTap;
+  final String title, subtitle; final IconData icon; final bool selected; final VoidCallback onTap;
   @override
   Widget build(BuildContext context) => InkWell(
     borderRadius: BorderRadius.circular(18.r), onTap: onTap,
     child: Ink(
       padding: EdgeInsets.all(12.w),
       decoration: BoxDecoration(
-        color: selected
-            ? AppColors.primary.withOpacity(0.12)
-            : Colors.black.withOpacity(0.04),
+        color: selected ? AppColors.primary.withOpacity(0.12) : Colors.black.withOpacity(0.04),
         borderRadius: BorderRadius.circular(18.r),
-        border: Border.all(color: selected
-            ? AppColors.primary.withOpacity(0.35)
-            : Colors.black.withOpacity(0.06)),
+        border: Border.all(color: selected ? AppColors.primary.withOpacity(0.35) : Colors.black.withOpacity(0.06)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
             height: 36.h, width: 36.h,
             decoration: BoxDecoration(
-              color: selected
-                  ? AppColors.primary.withOpacity(0.18)
-                  : Colors.black.withOpacity(0.06),
+              color: selected ? AppColors.primary.withOpacity(0.18) : Colors.black.withOpacity(0.06),
               borderRadius: BorderRadius.circular(12.r),
             ),
-            child: Icon(icon, size: 18.sp,
-                color: selected ? AppColors.primary : Colors.black54)),
+            child: Icon(icon, size: 18.sp, color: selected ? AppColors.primary : Colors.black54)),
         SizedBox(height: 8.h),
         Text(title, style: TextStyle(fontSize: 12.sp, fontWeight: FontWeight.w900)),
         SizedBox(height: 2.h),
-        Text(subtitle, style: TextStyle(fontSize: 11.sp,
-            color: AppColors.muted, fontWeight: FontWeight.w700)),
+        Text(subtitle, style: TextStyle(fontSize: 11.sp, color: AppColors.muted, fontWeight: FontWeight.w700)),
       ]),
     ),
   );
@@ -955,8 +835,7 @@ class _Card extends StatelessWidget {
     decoration: BoxDecoration(
       color: Colors.white, borderRadius: BorderRadius.circular(18.r),
       border: Border.all(color: Colors.black.withOpacity(0.05)),
-      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06),
-          blurRadius: 18, offset: const Offset(0, 6))],
+      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 18, offset: const Offset(0, 6))],
     ),
     child: child,
   );
