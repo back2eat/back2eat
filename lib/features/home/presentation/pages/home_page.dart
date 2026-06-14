@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/constants/app_colors.dart';
@@ -78,8 +79,23 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _detectLocationAndLoad() async {
     setState(() => _locationLoading = true);
     try {
+      // Check if location service is enabled — show dialog to open settings
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled && mounted) {
+        await LocationService.showEnableLocationDialog(context);
+      }
+
+      // Check permission
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.deniedForever && mounted) {
+        await LocationService.showPermissionDeniedDialog(context);
+        setState(() => _locationLoading = false);
+        _loadRestaurants();
+        return;
+      }
+
       final position = await LocationService.instance.getCurrentPosition();
-      if (position != null) {
+      if (position != null && mounted) {
         final placemarks = await placemarkFromCoordinates(
             position.latitude, position.longitude);
         if (placemarks.isNotEmpty && mounted) {
@@ -98,7 +114,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() => _locationLoading = false);
     _loadRestaurants();
   }
-
   void _loadRestaurants() {
     context.read<RestaurantBloc>().add(
         LoadRestaurantsEvent(city: _selectedCity));

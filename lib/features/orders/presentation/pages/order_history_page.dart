@@ -1,3 +1,7 @@
+// 📱 CUSTOMER APP
+// lib/features/orders/presentation/pages/order_history_page.dart
+// FIX: Filter out orders with paymentStatus PENDING (failed/incomplete payments)
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -87,6 +91,7 @@ class _OrderHistoryViewState extends State<_OrderHistoryView>
       body: TabBarView(
         controller: _tabs,
         children: [
+
           // ── Tab 1: Regular Orders ─────────────────────────────────────
           BlocBuilder<OrderBloc, OrderState>(
             builder: (context, state) {
@@ -111,7 +116,25 @@ class _OrderHistoryViewState extends State<_OrderHistoryView>
                   ]),
                 );
               }
-              final orders = state is OrdersLoaded ? state.orders : [];
+
+              final allOrders = state is OrdersLoaded ? state.orders : [];
+
+              // ── FILTER: hide orders where payment never completed ──────
+              // paymentStatus can be: PENDING, PAID, FOOD_PAID, FAILED
+              // PENDING = Razorpay was never opened or failed before completion
+              // Only show PAID, FOOD_PAID, and orders that are CANCELLED/COMPLETED
+              // (cancelled orders may have been paid then cancelled)
+              final orders = allOrders.where((o) {
+                final ps = (o.paymentStatus ?? '').toUpperCase();
+                // Show if payment was successful
+                if (ps == 'PAID' || ps == 'FOOD_PAID') return true;
+                // Show cancelled/completed even if paymentStatus is missing
+                // (legacy orders before paymentStatus was added)
+                if (ps.isEmpty) return true;
+                // Hide PENDING and FAILED — payment never went through
+                return false;
+              }).toList();
+
               if (orders.isEmpty) {
                 return Center(
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -126,6 +149,7 @@ class _OrderHistoryViewState extends State<_OrderHistoryView>
                   ]),
                 );
               }
+
               return RefreshIndicator(
                 onRefresh: () async => context
                     .read<OrderBloc>()
@@ -135,15 +159,15 @@ class _OrderHistoryViewState extends State<_OrderHistoryView>
                   itemCount: orders.length,
                   separatorBuilder: (_, __) => SizedBox(height: 12.h),
                   itemBuilder: (_, i) {
-                    final o = orders[i];
-                    final status = o.status;
+                    final o           = orders[i];
+                    final status      = o.status;
                     final statusColor = status == 'COMPLETED'
                         ? AppColors.success
                         : status == 'CANCELLED'
                         ? AppColors.danger
                         : AppColors.warning;
-                    final statusBg = statusColor.withOpacity(0.12);
-                    final typeLabel = o.orderType == 'DINE_IN'
+                    final statusBg    = statusColor.withOpacity(0.12);
+                    final typeLabel   = o.orderType == 'DINE_IN'
                         ? 'Dine-In'
                         : o.orderType == 'TABLE_BOOKING'
                         ? 'Table Booking'
@@ -172,7 +196,7 @@ class _OrderHistoryViewState extends State<_OrderHistoryView>
                             Container(
                               width: 52.w, height: 52.w,
                               decoration: BoxDecoration(
-                                color: AppColors.soft2 ?? AppColors.soft,
+                                color: AppColors.soft,
                                 borderRadius: BorderRadius.circular(16.r),
                               ),
                               child: const Icon(Icons.receipt_long,
@@ -300,7 +324,7 @@ class _OrderHistoryViewState extends State<_OrderHistoryView>
   }
 }
 
-// ── Booking Summary Card (used in history tab) ────────────────────────────────
+// ── Booking Summary Card ──────────────────────────────────────────────────────
 class _BookingSummaryCard extends StatelessWidget {
   final BookingEntity booking;
   const _BookingSummaryCard({required this.booking});
@@ -312,7 +336,7 @@ class _BookingSummaryCard extends StatelessWidget {
         : booking.status == 'CANCELLED'
         ? AppColors.danger
         : AppColors.warning;
-    final statusBg = statusColor.withOpacity(0.12);
+    final statusBg    = statusColor.withOpacity(0.12);
     final statusLabel = booking.status == 'CONFIRMED'
         ? 'Confirmed'
         : booking.status == 'CANCELLED'
