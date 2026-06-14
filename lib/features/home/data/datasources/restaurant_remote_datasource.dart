@@ -14,17 +14,26 @@ class RestaurantRemoteDatasource {
   RestaurantRemoteDatasource(this._api);
 
   Future<List<Restaurant>> getRestaurants({String? search, String? city}) async {
-    final query = StringBuffer('/restaurants?limit=30');
-    if (search != null && search.isNotEmpty) query.write('&search=$search');
-    if (city   != null && city.isNotEmpty)   query.write('&city=$city');
-
-    final data     = await _api.get(query.toString());
-    final list     = data['restaurants'] as List<dynamic>? ?? [];
+    // Get GPS position to send to backend for 20km radius filtering
     final position = await LocationService.instance.getCurrentPosition();
+
+    final query = StringBuffer('/restaurants?limit=100');
+    if (search != null && search.isNotEmpty) query.write('&search=${Uri.encodeComponent(search)}');
+    if (city   != null && city.isNotEmpty)   query.write('&city=${Uri.encodeComponent(city)}');
+
+    // Pass coordinates — backend filters to 20km radius
+    if (position != null) {
+      query.write('&lat=${position.latitude}&lng=${position.longitude}&radius=20');
+    }
+
+    final data = await _api.get(query.toString());
+    final list = data['restaurants'] as List<dynamic>? ?? [];
 
     return list.map((e) {
       final json = Map<String, dynamic>.from(e as Map<String, dynamic>);
-      if (position != null) {
+      // Backend already calculates distanceKm when coords provided
+      // If not present (no GPS), calculate client-side
+      if (json['distanceKm'] == null && position != null) {
         final lat = (json['latitude']  as num?)?.toDouble();
         final lng = (json['longitude'] as num?)?.toDouble();
         if (lat != null && lng != null) {
@@ -43,7 +52,6 @@ class RestaurantRemoteDatasource {
     final data     = await _api.get('/restaurants/$restaurantId');
     final branches = data['branches'] as List<dynamic>? ?? [];
 
-    // Pick selected branch or first branch
     Map<String, dynamic>? branch;
     if (branches.isNotEmpty) {
       if (selectedBranchId != null) {
@@ -65,7 +73,6 @@ class RestaurantRemoteDatasource {
     final branchOpenTime  = branch?['openTime']   as String?;
     final branchCloseTime = branch?['closeTime']  as String?;
 
-    // Build restaurant JSON with branch location injected
     final restaurantJson = Map<String, dynamic>.from(
         data['restaurant'] as Map<String, dynamic>);
     if (branchLat != null) restaurantJson['latitude']  = branchLat;
@@ -75,7 +82,6 @@ class RestaurantRemoteDatasource {
       restaurantJson['city'] = branchCity;
     }
 
-    // Real distance from device GPS
     final position = await LocationService.instance.getCurrentPosition();
     if (position != null && branchLat != null && branchLng != null) {
       restaurantJson['distanceKm'] = LocationService.distanceKm(
@@ -85,7 +91,6 @@ class RestaurantRemoteDatasource {
 
     final restaurant = RestaurantModel.fromJson(restaurantJson);
 
-    // Fetch menu
     List<MenuItem> menuItems = [];
     if (branchId != null) {
       try {
@@ -116,7 +121,12 @@ class RestaurantRemoteDatasource {
 
   Future<List<(String, int)>> getCategories() async {
     try {
-      final data = await _api.get('/restaurants?limit=100');
+      final position = await LocationService.instance.getCurrentPosition();
+      final query    = StringBuffer('/restaurants?limit=200');
+      if (position != null) {
+        query.write('&lat=${position.latitude}&lng=${position.longitude}&radius=20');
+      }
+      final data = await _api.get(query.toString());
       final list = data['restaurants'] as List<dynamic>? ?? [];
       final Map<String, int> counts = {};
       for (final r in list) {
